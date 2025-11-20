@@ -1,0 +1,400 @@
+{% extends 'base.html' %}
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+<style>
+  .page-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+  }
+  .low-stock {
+    background-color: #fff3cd !important; /* Yellowish for low stock */
+  }
+  
+  /* NEW: Style for disabled (inactive) rows */
+  .disabled-row {
+    background-color: #f8f9fa !important;
+    text-decoration: line-through;
+    color: #6c757d;
+  }
+</style>
+
+<div class="container-fluid mt-3">
+  <div class="page-header">
+    <h2><i class="bi bi-box-seam me-2"></i>Inventory</h2>
+
+    <div>
+      <!-- <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addProductModal">
+        <i class="bi bi-plus-circle me-1"></i> Add Product
+      </button> -->
+
+      {% if not has_opening_balance %}
+      <a href="{{ url_for('core.inventory_bulk_add') }}" class="btn btn-success ms-2">
+      <i class="bi bi-upload me-1"></i> Bulk Add (CSV)
+      </a>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="card mb-3">
+    <div class="card-body d-flex justify-content-between align-items-center">
+      
+      <form method="GET" action="{{ url_for('core.inventory') }}" class="d-flex align-items-center">
+        <div class="input-group" style="max-width: 300px;">
+          <input type="text" name="search" value="{{ search or '' }}" class="form-control" placeholder="Search by SKU or Name...">
+          <button type="submit" class="btn btn-primary">
+            <i class="bi bi-search"></i>
+          </button>
+        </div>
+      </form>
+      
+      <div>
+        <span class="badge bg-success">In Stock</span>
+        <span class="badge bg-warning">Low Stock (≤5)</span>
+        <span class="badge bg-danger">Disabled</span>
+      </div>
+    </div>
+  </div>
+
+
+  <div class="card">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table id="inventoryTable" class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>SKU</th>
+              <th>Name</th>
+              <th>Sale Price</th>
+              <th>Cost Price</th>
+              <th>Quantity</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for p in products %}
+            <tr class="{% if not p.is_active %}disabled-row{% elif p.quantity <= 5 %}low-stock{% endif %}">
+              <td>{{ p.sku }}</td>
+              <td>{{ p.name }}</td>
+              <td>₱{{ "%.2f"|format(p.sale_price) }}</td>
+              <td>₱{{ "%.2f"|format(p.cost_price) }}</td>
+              <td>{{ p.quantity }}</td>
+              <td>
+                {% if not p.is_active %}
+                  <span class="badge bg-danger">Disabled</span>
+                {% elif p.quantity <= 5 %}
+                  <span class="badge bg-warning">Low Stock</span>
+                {% else %}
+                  <span class="badge bg-success">In Stock</span>
+                {% endif %}
+              </td>
+              <td>
+                <a href="{{ url_for('core.inventory_lots', product_id=p.id) }}" 
+                   class="btn btn-sm btn-outline-primary" 
+                   title="View FIFO Lots">
+                    <i class="bi bi-layers"></i>
+                </a>
+                <a href="{{ url_for('reports.stock_card', product_id=p.id) }}" class="btn btn-sm btn-outline-info" title="View Stock Card">
+                    <i class="bi bi-card-list"></i>
+                </a>
+                <button class="btn btn-sm btn-outline-secondary"
+                          onclick='editProduct({{ p.sku|tojson }}, {{ p.name|tojson }}, {{ p.sale_price }}, {{ p.cost_price }})'>
+                  <i class="bi bi-pencil"></i>
+                </button>
+                
+                {% if p.is_active %}
+                  <button class="btn btn-sm btn-outline-danger" 
+                          onclick="toggleStatus({{ p.id }}, '{{ p.name }}')"
+                          title="Disable Product">
+                    <i class="bi bi-x-circle"></i> </button>
+                {% else %}
+                  <button class="btn btn-sm btn-outline-success" 
+                          onclick="toggleStatus({{ p.id }}, '{{ p.name }}')"
+                          title="Enable Product">
+                    <i class="bi bi-check-circle"></i> </button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+<script>
+// ... (all your other script functions: addRow, submitMultipleProducts, editProduct, toggleStatus) ...
+
+// --- START OF MODIFIED TOM SELECT SCRIPT ---
+document.addEventListener('DOMContentLoaded', (event) => {
+    
+    // Initialize Tom Select for the Adjust Stock dropdown
+    new TomSelect('#productSelectDropdown', {
+        create: false, 
+        sortField: { field: "text", direction: "asc" },
+        dropdownParent: 'body', 
+        
+        // This is the key setting to control how many results are shown.
+        // It limits the number of options visible in the dropdown *after* filtering/searching.
+        maxOptions: 5, 
+
+        // Set the placeholder text
+        placeholder: 'Select a product...', 
+
+        // Ensure the dropdown is always open on focus, making the initial list appear
+        onFocus: function() {
+            if (!this.isOpen) {
+                this.open();
+            }
+        },
+        
+        // Custom filtering function to ensure the initial list (before typing) 
+        // respects the maxOptions limit. By default, Tom Select shows all options 
+        // when the search box is empty, but maxOptions should limit the visible results.
+        // We'll rely on maxOptions, but this setting can fine-tune the search.
+        shouldOpen: true, 
+    });
+
+    // --- Optional: Clear Tom Select when modal is closed ---
+// --- END OF MODIFIED TOM SELECT SCRIPT ---
+</script>
+
+<div class="modal fade" id="addProductModal" tabindex="-1">
+  <div class="modal-dialog modal-lg modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-boxes me-2"></i>Add Multiple Products</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div class="table-responsive">
+          <table class="table table-sm" id="multiProductTable">
+            <thead>
+                <tr>
+                  <th style="width: 20%">SKU</th>
+                  <th style="width: 30%">Name</th>
+                  <th style="width: 15%">Sale Price</th>
+                  <th style="width: 15%">Cost Price</th>
+                  <th style="width: 15%">Initial Qty</th>
+                  <th style="width: 5%"><button type="button" class="btn btn-sm btn-outline-success" onclick="addRow()">+</button></th>
+                </tr>
+              </thead>
+            <tbody>
+              </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" onclick="submitMultipleProducts()">
+          <i class="bi bi-save me-1"></i>Save All Products
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="editProductModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <form id="editForm" method="post" action="/update_product">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-pencil me-2"></i>Edit Product</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="sku" id="editSKU">
+          <div class="mb-3">
+            <label class="form-label">Name</label>
+            <input name="name" id="editName" class="form-control" required>
+          </div>
+          <div class="row">
+            <div class="col">
+              <label class="form-label">Sale Price</label>
+              <input name="sale_price" id="editSale" class="form-control" type="number" step="0.01" required>
+            </div>
+            <div class="col">
+              <label class="form-label">Cost Price</label>
+              <input name="cost_price" id="editCost" class="form-control" type="number" step="0.01" required>
+            </div>
+          </div>
+          </div>
+        <div class="modal-footer">
+          <button type="submit" class="btn btn-success"><i class="bi bi-check-lg me-1"></i>Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+
+<div class="modal fade" id="voidAdjustmentModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="voidAdjustmentForm" method="POST">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>Void Stock Adjustment
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-warning">
+            <strong>Warning:</strong> This will reverse the quantity adjustment and remove inventory lots.
+          </div>
+          <p>Adjustment: <strong id="voidAdjustmentTargetName"></strong></p>
+          <div class="mb-3">
+            <label class="form-label"><strong>Void Reason *</strong></label>
+            <textarea name="void_reason" class="form-control" rows="3" placeholder="Enter reason for voiding this adjustment..." required></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">
+            <i class="bi bi-x-circle me-1"></i> Void Adjustment
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function setVoidAdjustmentTarget(actionUrl, targetName) {
+  document.getElementById('voidAdjustmentForm').action = actionUrl;
+  document.getElementById('voidAdjustmentTargetName').textContent = targetName;
+}
+</script>
+
+
+
+<script>
+  // addRow() and submitMultipleProducts() functions remain the same
+  // ...
+  function addRow() {
+      const tbody = document.getElementById('multiProductTable').querySelector('tbody');
+      const newRow = tbody.insertRow();
+      
+      newRow.innerHTML = `
+          <td><input type="text" class="form-control form-control-sm" name="sku" required></td>
+          <td><input type="text" class="form-control form-control-sm" name="name" required></td>
+          <td><input type="number" step="0.01" class="form-control form-control-sm" name="sale_price" value="0.00" required></td>
+          <td><input type="number" step="0.01" class="form-control form-control-sm" name="cost_price" value="0.00" required></td>
+          <td><input type="number" step="1" class="form-control form-control-sm" name="quantity" value="0" title="Set this for beginning inventory only." required></td>
+          <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()">-</button></td>
+      `;
+  }
+  async function submitMultipleProducts() {
+      const table = document.getElementById('multiProductTable');
+      const rows = table.querySelector('tbody').rows;
+      const products = [];
+      
+      let isValid = true;
+      for (const row of rows) {
+          const inputs = row.querySelectorAll('input');
+          const product = {};
+          
+          inputs.forEach(input => {
+              product[input.name] = input.value;
+              if (input.required && !input.value) {
+                  isValid = false;
+              }
+          });
+
+          if (product.sku && product.name) {
+               products.push(product);
+          }
+      }
+
+      if (!isValid) {
+          alert('Please fill out all required fields in all visible rows.');
+          return;
+      }
+      
+      if (products.length === 0) {
+           alert('No products to submit.');
+           return;
+      }
+
+      const response = await fetch('/api/add_multiple_products', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ products: products })
+      });
+
+      const data = await response.json();
+
+      if (data.status === 'ok') {
+          alert('Successfully added ' + data.count + ' products.');
+          new bootstrap.Modal(document.getElementById('addProductModal')).hide(); 
+          location.reload();
+      } else {
+          // MODIFIED: Corrected alert syntax
+          alert('Error adding products: ' + (data.error || 'Unknown error'));
+      }
+  }
+
+  // DOMContentLoaded logic remains the same
+  // ...
+  document.addEventListener('DOMContentLoaded', () => {
+      const modal = document.getElementById('addProductModal');
+      if (modal) {
+          modal.addEventListener('show.bs.modal', () => {
+              const tbody = document.getElementById('multiProductTable').querySelector('tbody');
+              tbody.innerHTML = '';
+              addRow(); 
+          });
+      }
+  });
+
+
+  // editProduct function remains the same
+  // ...
+  function editProduct(sku, name, sale, cost) {
+    document.getElementById('editSKU').value = sku;
+    document.getElementById('editName').value = name;
+    document.getElementById('editSale').value = sale;
+    document.getElementById('editCost').value = cost;
+    new bootstrap.Modal(document.getElementById('editProductModal')).show();
+  }
+
+
+  // --- REMOVED old deleteProduct(sku) function ---
+
+  
+  // --- ADDED new toggleStatus function ---
+  function toggleStatus(productId, productName) {
+    // We ask for confirmation
+    const action = confirm(`Are you sure you want to change the status for "${productName}"?`);
+    
+    if (action) {
+      // We call the new backend route
+      fetch(`/product/toggle-status/${productId}`, { 
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+      })
+      .then(res => res.json())
+      .then(data => {
+        if (data.status === 'ok') {
+          location.reload(); // Simple reload to show all changes
+        } else {
+          alert('Failed to update product status.');
+        }
+      })
+      .catch((error) => {
+        console.error('Error:', error);
+        alert('An error occurred while toggling the status.');
+      });
+    }
+  }
+</script>
+
+{% include "_pagination.html" %}
+{% endblock %}

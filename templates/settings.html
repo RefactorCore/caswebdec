@@ -1,0 +1,217 @@
+{% extends 'base.html' %}
+{% block content %}
+<h3>Settings</h3>
+<p>Manage your application and company settings here.</p>
+
+<ul class="nav nav-tabs" id="settingsTabs" role="tablist">
+  <li class="nav-item" role="presentation">
+    <button class="nav-link active" id="profile-tab" data-bs-toggle="tab" data-bs-target="#profile" type="button" role="tab">Company Profile</button>
+  </li>
+  <li class="nav-item" role="presentation">
+    <button class="nav-link" id="users-tab" data-bs-toggle="tab" data-bs-target="#users" type="button" role="tab">User Management</button>
+  </li>
+</ul>
+
+<div class="tab-content border border-top-0 p-3 rounded-bottom mb-4">
+  <div class="tab-pane fade show active" id="profile" role="tabpanel">
+      <form method="POST" action="{{ url_for('core.settings') }}">
+        <div class="mb-3">
+            <label class="form-label">Business Name</label>
+            <input type="text" name="name" class="form-control" value="{{ profile.name }}" required>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">TIN</label>
+            <input type="text" name="tin" class="form-control" value="{{ profile.tin }}" required>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Address</label>
+            <input type="text" name="address" class="form-control" value="{{ profile.address }}" required>
+        </div>
+        <div class="mb-3">
+            <label class="form-label">Branch</label>
+            <input type="text" name="branch" class="form-control" value="{{ profile.branch or '' }}" placeholder="e.g., Main Branch">
+        </div>
+         <div class="mb-3">
+            <label class="form-label">License Key</label>
+            <input type="text" class="form-control" value="{{ profile.license_key or 'N/A' }}" disabled readonly>
+        </div>
+        <button type="submit" class="btn btn-primary">Save Changes</button>
+    </form>
+  </div>
+  
+  <div class="tab-pane fade" id="users" role="tabpanel">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h5>All Users</h5>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#addUserModal">
+            <i class="bi bi-plus-circle me-1"></i> Add New User
+        </button>
+    </div>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Username</th>
+                <th>Role</th>
+                <th class="text-end">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for user in users %}
+            <tr>
+                <td>{{ user.username }}</td>
+                <td><span class="badge bg-secondary">{{ user.role }}</span></td>
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-secondary edit-btn" 
+                            data-bs-toggle="modal" 
+                            data-bs-target="#editUserModal"
+                            data-user-id="{{ user.id }}"
+                            data-user-username="{{ user.username }}"
+                            data-user-role="{{ user.role }}">
+                        Edit
+                    </button>
+                    <button class="btn btn-sm btn-outline-danger delete-btn" 
+                            data-bs-toggle="modal"
+                            data-bs-target="#deleteUserModal"
+                            data-user-id="{{ user.id }}"
+                            data-user-username="{{ user.username }}"
+                            {% if user.id == current_user.id %}disabled{% endif %}>
+                        Delete
+                    </button>
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+  </div>
+</div>
+
+<div class="modal fade" id="addUserModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form action="{{ url_for('users.create_user') }}" method="POST">
+        <div class="modal-header">
+          <h5 class="modal-title">Create New User</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+            <div class="mb-3">
+                <label class="form-label">Username</label>
+                <input type="text" name="username" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Password</label>
+                <input type="password" name="password" class="form-control" required>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Role</label>
+                <select name="role" class="form-select" required>
+                    <option value="Cashier">Cashier</option>
+                    <option value="Accountant">Accountant</option>
+                    <option value="Admin">Admin</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary">Create User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="editUserModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="editUserForm" method="POST">
+        <div class="modal-header">
+          <h5 class="modal-title">Edit User</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+            <div class="mb-3">
+                <label class="form-label">Username</label>
+                <input type="text" id="editUsername" class="form-control" disabled readonly>
+            </div>
+            <div class="mb-3">
+                <label class="form-label">New Password (optional)</label>
+                <input type="password" name="password" class="form-control" placeholder="Leave blank to keep current password">
+            </div>
+            <div class="mb-3">
+                <label class="form-label">Role</label>
+                <select name="role" id="editRole" class="form-select" required>
+                    <option value="Cashier">Cashier</option>
+                    <option value="Accountant">Accountant</option>
+                    <option value="Admin">Admin</option>
+                </select>
+            </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+          <button type="submit" class="btn btn-primary">Save Changes</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="deleteUserModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="deleteUserForm" method="POST">
+        <div class="modal-header">
+          <h5 class="modal-title">Confirm Deletion</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+            <p>Are you sure you want to delete the user <strong id="deleteUsername"></strong>?</p>
+            <p class="text-danger">This action cannot be undone.</p>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">Delete User</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    // --- Script for Edit Modal ---
+    const editUserModal = document.getElementById('editUserModal');
+    if (editUserModal) {
+        editUserModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const userId = button.getAttribute('data-user-id');
+            const username = button.getAttribute('data-user-username');
+            const role = button.getAttribute('data-user-role');
+
+            const form = editUserModal.querySelector('#editUserForm');
+            const usernameInput = editUserModal.querySelector('#editUsername');
+            const roleSelect = editUserModal.querySelector('#editRole');
+
+            form.action = `/users/update/${userId}`;
+            usernameInput.value = username;
+            roleSelect.value = role;
+        });
+    }
+
+    // --- Script for Delete Modal ---
+    const deleteUserModal = document.getElementById('deleteUserModal');
+    if (deleteUserModal) {
+        deleteUserModal.addEventListener('show.bs.modal', function (event) {
+            const button = event.relatedTarget;
+            const userId = button.getAttribute('data-user-id');
+            const username = button.getAttribute('data-user-username');
+            
+            const form = deleteUserModal.querySelector('#deleteUserForm');
+            const usernameSpan = deleteUserModal.querySelector('#deleteUsername');
+            
+            form.action = `/users/delete/${userId}`;
+            usernameSpan.textContent = username;
+        });
+    }
+});
+</script>
+
+{% endblock %}

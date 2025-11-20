@@ -1,0 +1,124 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container my-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2 class="mb-1">📋 Inventory Stock Card</h2>
+            <h5 class="text-muted">{{ product.name }} (SKU: {{ product.sku }})</h5>
+            <p class="mb-0">
+                <strong>Current Stock:</strong> 
+                <span class="badge bg-primary fs-6">{{ product.quantity }} units</span>
+            </p>
+        </div>
+        <a href="{{ url_for('core.inventory') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Inventory
+        </a>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-striped table-hover">
+                    <thead class="table-primary">
+                        <tr>
+                            <th>Date</th>
+                            <th>Transaction Type</th>
+                            <th>Reference ID</th>
+                            <th class="text-end">Qty In</th>
+                            <th class="text-end">Qty Out</th>
+                            <th class="text-end">Running Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for t in transactions %}
+                        <!-- ✅ UPDATED: Add strikethrough for voided transactions -->
+                        <tr class="{{ 'table-secondary text-decoration-line-through' if t.voided else '' }}">
+                            <td>{{ t.date.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>
+                                {% if t.voided %}
+                                    <!-- ✅ Show VOID badge for voided transactions -->
+                                    <span class="badge bg-dark me-1">VOIDED</span>
+                                {% endif %}
+                                
+                                {% if 'Sale (POS)' in t.type %}
+                                    <span class="badge bg-danger">{{ t.type }}</span>
+                                {% elif 'Purchase' in t.type %}
+                                    <span class="badge bg-success">{{ t.type }}</span>
+                                {% elif 'Billing Invoice' in t.type %}
+                                    <span class="badge bg-info">{{ t.type }}</span>
+                                {% elif 'Adjustment' in t.type %}
+                                    <span class="badge bg-warning text-dark">{{ t.type }}</span>
+                                {% elif 'Opening Balance' in t.type %}
+                                    <span class="badge bg-secondary">{{ t.type }}</span>
+                                {% else %}
+                                    <span class="badge bg-secondary">{{ t.type }}</span>
+                                {% endif %}
+                                
+                                <!-- ✅ Show void reason if available -->
+                                {% if t.voided and t.void_reason %}
+                                <br><small class="text-muted fst-italic">Reason: {{ t.void_reason }}</small>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if t.ref_id == 'N/A' %}
+                                    <span class="text-muted">{{ t.ref_id }}</span>
+                                {% else %}
+                                    #{{ t.ref_id }}
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if t.qty_in > 0 %}
+                                    <span class="text-success fw-bold">+{{ t.qty_in }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end">
+                                {% if t.qty_out > 0 %}
+                                    <span class="text-danger fw-bold">-{{ t.qty_out }}</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end fw-bolder 
+                                {{ 'text-success' if t.balance > 0 else ('text-danger' if t.balance < 0 else 'text-muted') }}">
+                                {{ t.balance }}
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="6" class="text-center text-muted">No transactions found for this product.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                    <tfoot class="table-light">
+                        <tr class="fw-bold">
+                            <td colspan="5" class="text-end">Current Stock Balance:</td>
+                            <td class="text-end fs-5 text-primary">{{ product.quantity }} units</td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- ✅ NEW: Legend -->
+    <div class="card mt-3">
+        <div class="card-body">
+            <h6 class="card-title">Legend:</h6>
+            <div class="row">
+                <div class="col-md-6">
+                    <ul class="list-unstyled">
+                        <li><span class="badge bg-danger">Sale (POS)</span> - Cash/POS Sales</li>
+                        <li><span class="badge bg-info">Billing Invoice</span> - Credit Sales (AR)</li>
+                        <li><span class="badge bg-success">Purchase</span> - Inventory Purchases</li>
+                    </ul>
+                </div>
+                <div class="col-md-6">
+                    <ul class="list-unstyled">
+                        <li><span class="badge bg-warning text-dark">Adjustment</span> - Stock Adjustments</li>
+                        <li><span class="badge bg-dark">VOIDED</span> - Transaction was reversed/voided</li>
+                        <li><span class="text-decoration-line-through">Strikethrough</span> - Voided entry</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

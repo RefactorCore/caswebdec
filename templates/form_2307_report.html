@@ -1,0 +1,93 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>BIR Form 2307 Data Generator (CWT)</h3>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-4">
+                <label for="customer_id" class="form-label">Select Customer (Payee)</label>
+                <select id="customer_id" name="customer_id" class="form-select">
+                    <option value="">-- Select a Customer --</option>
+                    {% for c in customers %}
+                    <option value="{{ c.id }}" {% if c.id == selected_customer_id %}selected{% endif %}>{{ c.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label for="month" class="form-label">For the Month Of</label>
+                <input type="month" id="month" name="month" value="{{ month }}" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary">Generate Data</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+{% if customer %}
+<div class="card">
+    <div class="card-header">
+        <h4>Certificate of Creditable Tax Withheld at Source (Data for Form 2307)</h4>
+    </div>
+    <div class="card-body">
+        <div class="row mb-4">
+            <div class="col-md-6">
+                <strong>PAYOR (Your Company)</strong><br>
+                Name: {{ company.name }}<br>
+                TIN: {{ company.tin }}<br>
+                Address: {{ company.address }}
+            </div>
+            <div class="col-md-6">
+                <strong>PAYEE (Your Customer)</strong><br>
+                Name: {{ customer.name }}<br>
+                TIN: {{ customer.tin or 'N/A' }}<br>
+                Address: {{ customer.address or 'N/A' }}
+            </div>
+        </div>
+
+        <hr>
+
+        <h5>Payments for {{ month }}</h5>
+        <table class="table table-bordered">
+            <thead class="table-light">
+                <tr>
+                    <th>Payment Date</th>
+                    <th>AR Invoice #</th>
+                    <th class="text-end">Gross Amount Paid (Net of VAT)</th>
+                    <th class="text-end">Tax Withheld (CWT)</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for p in payments %}
+                <tr>
+                    <td>{{ p.date.strftime('%Y-%m-%d') }}</td>
+                    <td>#{{ p.ref_id }}</td>
+                    <td class="text-end">{{ (p.amount / 1.12)|money }}</td> {# Assuming 12% VAT #}
+                    <td class="text-end">{{ p.wht_amount|money }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="text-center text-muted">No withholding tax payments found for this customer and period.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            {% if payments %}
+            <tfoot class="table-group-divider fw-bold">
+                <tr>
+                    <td colspan="2">Total</td>
+                    <td class="text-end">{{ (payments|sum(attribute='amount') / 1.12)|money }}</td>
+                    <td class="text-end">{{ payments|sum(attribute='wht_amount')|money }}</td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+        <p class="text-muted small mt-3">Note: This report generates the data required to fill out BIR Form 2307. The gross amount is calculated as the cash payment received, net of 12% VAT.</p>
+    </div>
+</div>
+{% endif %}
+
+{% endblock %}

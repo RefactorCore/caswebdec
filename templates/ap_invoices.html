@@ -1,0 +1,366 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid my-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-file-earmark-text me-2"></i>AP Invoices (Accounts Payable)</h2>
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#newAPInvoiceModal">
+            <i class="bi bi-plus-circle me-1"></i> New AP Invoice
+        </button>
+    </div>
+
+    <!-- Invoices List -->
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 5%;">ID</th>
+                            <th style="width: 10%;">Invoice #</th>
+                            <th style="width: 8%;">Date</th>
+                            <th style="width: 8%;">Due Date</th>
+                            <th style="width: 12%;">Supplier</th>
+                            <th style="width: 12%;">Description</th>
+                            <th style="width: 6%;">Type</th>
+                            <th style="width: 8%;" class="text-end">Total</th>
+                            <th style="width: 8%;" class="text-end">Paid</th>
+                            <th style="width: 8%;" class="text-end">Balance</th>
+                            <th style="width: 7%;">Status</th>
+                            <th style="width: 8%;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for inv in invoices %}
+                        {% set balance = inv.total - inv.paid %}
+                        <tr class="{{ 'table-secondary text-decoration-line-through' if inv.voided_at else '' }}">
+                            <td><strong>#{{ inv.id }}</strong></td>
+                            <td><small>{{ inv.invoice_number or '—' }}</small></td>
+                            <td><small>{{ inv.date.strftime('%Y-%m-%d') }}</small></td>
+                            <td>
+                                {% if inv.due_date %}
+                                    <small>{{ inv.due_date.strftime('%Y-%m-%d') }}</small>
+                                {% else %}
+                                    <small class="text-muted">—</small>
+                                {% endif %}
+                            </td>
+                            <td><small>{{ inv.supplier.name if inv.supplier else 'N/A' }}</small></td>
+                            <td><small>{{ inv.description or '—' }}</small></td>
+                            <td>
+                                <span class="badge bg-{{ 'info' if inv.is_vatable else 'secondary' }} badge-sm">
+                                    {{ 'VAT' if inv.is_vatable else 'Non' }}
+                                </span>
+                            </td>
+                            <td class="text-end"><small>{{ inv.total | money }}</small></td>
+                            <td class="text-end"><small>{{ inv.paid | money }}</small></td>
+                            <td class="text-end"><small>{{ balance | money }}</small></td>
+                            <td>
+                                {% if inv.voided_at %}
+                                    <span class="badge bg-dark">VOID</span>
+                                {% else %}
+                                    {% if inv.status == 'Paid' %}
+                                        <span class="badge bg-success">Paid</span>
+                                    {% elif inv.status == 'Partially Paid' %}
+                                        <span class="badge bg-warning text-dark">Part</span>
+                                    {% else %}
+                                        <span class="badge bg-danger">Open</span>
+                                    {% endif %}
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="btn-group btn-group-sm" role="group">
+                                    {% if not inv.voided_at %}
+                                        {% if inv.status != 'Paid' %}
+                                        <button class="btn btn-outline-primary btn-sm" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#recordPaymentModal" 
+                                                onclick="setPaymentDetails('AP', {{ inv.id }}, {{ balance }})"
+                                                title="Pay">
+                                            <i class="bi bi-cash"></i>
+                                        </button>
+                                        {% endif %}
+                                        
+                                        <button class="btn btn-outline-danger btn-sm" 
+                                                data-bs-toggle="modal" 
+                                                data-bs-target="#voidAPInvoiceModal"
+                                                onclick="setVoidAPInvoiceTarget('{{ url_for('void.void_ap_invoice', invoice_id=inv.id) }}', 'AP #{{ inv.id }} ({{ inv.invoice_number or 'N/A' }})', {{ inv.paid }})"
+                                                title="Void">
+                                            <i class="bi bi-x-circle"></i>
+                                        </button>
+                                    {% else %}
+                                        <small class="text-muted">Voided</small>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                        {% else %}
+                        <tr>
+                            <td colspan="12" class="text-center">No AP invoices found.</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ✅ NEW: Void AP Invoice Modal -->
+<div class="modal fade" id="voidAPInvoiceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="voidAPInvoiceForm" method="POST">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>Void AP Invoice
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <strong>Warning:</strong> This will reverse all accounting entries.
+                    </div>
+                    
+                    <!-- Payment Warning -->
+                    <div id="voidAPPaymentWarning" class="alert alert-danger d-none">
+                        <strong>Error:</strong> Cannot void invoice with payments. Please void the payments first.
+                    </div>
+                    
+                    <p>AP Invoice: <strong id="voidAPInvoiceTargetName"></strong></p>
+                    
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Void Reason *</strong></label>
+                        <textarea name="void_reason" class="form-control" rows="3" placeholder="Enter reason for voiding this AP invoice..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger" id="voidAPInvoiceSubmitBtn">
+                        <i class="bi bi-x-circle me-1"></i> Void Invoice
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- New AP Invoice Modal -->
+<!-- New AP Invoice Modal -->
+<div class="modal fade" id="newAPInvoiceModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <form action="{{ url_for('ar_ap.ap_invoices') }}" method="POST">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-file-earmark-text me-2"></i>New AP Invoice</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Supplier *</strong></label>
+                            <select name="supplier_id" class="form-select" required>
+                                <option value="">Select Supplier...</option>
+                                {% for sup in suppliers %}
+                                <option value="{{ sup.id }}">{{ sup.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Invoice Number</strong></label>
+                            <input type="text" name="invoice_number" class="form-control" placeholder="Supplier's invoice #">
+                        </div>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Due Date</strong></label>
+                            <input type="date" name="due_date" class="form-control">
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label"><strong>Expense Account *</strong></label>
+                            <select name="expense_account_code" class="form-select" required>
+                                {% for acc in accounts %}
+                                <option value="{{ acc.code }}">{{ acc.code }} - {{ acc.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Description</strong></label>
+                        <input type="text" name="description" class="form-control" placeholder="e.g., Utilities for November">
+                    </div>
+
+                    <!-- ✅ UPDATED: VAT Toggle at the top for better UX -->
+                    <div class="mb-3">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_vatable" value="true" id="apIsVatable" checked onchange="toggleAPVatCalculation()">
+                            <label class="form-check-label" for="apIsVatable">
+                                <strong>This invoice is VATable (12% VAT)</strong>
+                            </label>
+                        </div>
+                        <small class="text-muted">When enabled, VAT will be calculated from the total amount</small>
+                    </div>
+
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Total Amount (Gross) *</strong></label>
+                            <input type="number" step="0.01" name="total" id="apTotalAmount" class="form-control" required oninput="calculateAPVat()">
+                            <small class="text-muted">Including VAT if applicable</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>VAT Amount (12%)</strong></label>
+                            <input type="number" step="0.01" name="vat" id="apVatAmount" class="form-control" value="0" readonly>
+                            <small class="text-muted" id="apVatHint">Auto-calculated</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Net Amount</strong></label>
+                            <input type="text" id="apNetAmount" class="form-control" readonly style="background-color: #e9ecef;">
+                            <small class="text-muted">Excluding VAT</small>
+                        </div>
+                    </div>
+
+                    <!-- ✅ NEW: Visual breakdown -->
+                    <div class="alert alert-info" id="apVatBreakdown" style="display: none;">
+                        <small>
+                            <strong>Calculation:</strong><br>
+                            Gross Amount: <span id="breakdownGross">₱0.00</span><br>
+                            VAT (12%): <span id="breakdownVat">₱0.00</span><br>
+                            Net Amount: <span id="breakdownNet">₱0.00</span>
+                        </small>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-save"></i> Create AP Invoice
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Payment Modal -->
+<div class="modal fade" id="recordPaymentModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form action="{{ url_for('ar_ap.record_payment') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Record Payment</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="ref_type" id="paymentRefType">
+                    <input type="hidden" name="ref_id" id="paymentRefId">
+
+                    <div class="mb-3">
+                        <label class="form-label">Amount Paid</label>
+                        <input type="number" step="0.01" name="amount" id="paymentAmount" class="form-control" required>
+                        <div class="form-text">Max balance: <span id="maxBalance"></span></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Payment Method</label>
+                        <select name="method" class="form-select" required>
+                            <option value="Cash">Cash</option>
+                            <option value="Bank">Bank Transfer/Check</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary">Record Payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// ✅ VAT Calculation for AP Invoice
+function calculateAPVat() {
+    const totalInput = document.getElementById('apTotalAmount');
+    const vatInput = document.getElementById('apVatAmount');
+    const netInput = document.getElementById('apNetAmount');
+    const isVatable = document.getElementById('apIsVatable').checked;
+    
+    const total = parseFloat(totalInput.value) || 0;
+    
+    if (isVatable && total > 0) {
+        // Calculate VAT from gross amount
+        // Formula: VAT = Gross × (12/112)
+        const vat = total * (12 / 112);
+        const net = total - vat;
+        
+        vatInput.value = vat.toFixed(2);
+        netInput.value = '₱' + net.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        
+        // Update breakdown
+        document.getElementById('breakdownGross').textContent = '₱' + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        document.getElementById('breakdownVat').textContent = '₱' + vat.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        document.getElementById('breakdownNet').textContent = '₱' + net.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        document.getElementById('apVatBreakdown').style.display = 'block';
+    } else {
+        vatInput.value = '0.00';
+        netInput.value = '₱' + total.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+        document.getElementById('apVatBreakdown').style.display = 'none';
+    }
+}
+
+function toggleAPVatCalculation() {
+    const isVatable = document.getElementById('apIsVatable').checked;
+    const vatInput = document.getElementById('apVatAmount');
+    const vatHint = document.getElementById('apVatHint');
+    
+    if (isVatable) {
+        vatInput.readOnly = true;
+        vatInput.style.backgroundColor = '#e9ecef';
+        vatHint.textContent = 'Auto-calculated';
+        calculateAPVat(); // Recalculate immediately
+    } else {
+        vatInput.readOnly = false;
+        vatInput.style.backgroundColor = '';
+        vatInput.value = '0.00';
+        vatHint.textContent = 'Manual entry (if needed)';
+        calculateAPVat(); // Update display
+    }
+}
+
+// ✅ Initialize on page load
+document.addEventListener('DOMContentLoaded', function() {
+    // Set up VAT calculation when modal opens
+    const apModal = document.getElementById('newAPInvoiceModal');
+    if (apModal) {
+        apModal.addEventListener('show.bs.modal', function() {
+            toggleAPVatCalculation(); // Initialize state
+        });
+    }
+});
+
+// ✅ Void AP invoice function with payment check
+function setVoidAPInvoiceTarget(actionUrl, targetName, paidAmount) {
+    document.getElementById('voidAPInvoiceForm').action = actionUrl;
+    document.getElementById('voidAPInvoiceTargetName').textContent = targetName;
+    
+    // Check if invoice has payments
+    const warningDiv = document.getElementById('voidAPPaymentWarning');
+    const submitBtn = document.getElementById('voidAPInvoiceSubmitBtn');
+    
+    if (paidAmount > 0) {
+        warningDiv.classList.remove('d-none');
+        submitBtn.disabled = true;
+    } else {
+        warningDiv.classList.add('d-none');
+        submitBtn.disabled = false;
+    }
+}
+
+function setPaymentDetails(refType, refId, balance) {
+    document.getElementById('paymentRefType').value = refType;
+    document.getElementById('paymentRefId').value = refId;
+    document.getElementById('paymentAmount').value = balance.toFixed(2);
+    document.getElementById('paymentAmount').max = balance.toFixed(2);
+    document.getElementById('maxBalance').innerText = '₱' + balance.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+</script>
+
+{% endblock %}

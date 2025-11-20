@@ -1,0 +1,11 @@
+No.	Motorcycle Part	Sale Price (₱)	Cost Price (₱)	Quantity (Qty)
+1	Air Filter Element	₱150	₱75	50
+2	Spark Plug (Standard)	₱80	₱35	100
+3	Front Disc Brake Pads (Set)	₱180	₱90	40
+4	Oil Filter (Cartridge)	₱120	₱60	60
+5	Clutch Cable	₱160	₱80	30
+6	Side Mirror (Pair)	₱250	₱120	25
+7	Tire Tube (Common Size)	₱350	₱180	40
+8	Chain & Sprocket Kit (Set)	₱850	₱500	15
+9	Drive Belt (for Scooter/AT)	₱500	₱300	20
+10	Headlight Bulb (Standard Halogen)	₱90	₱40	50

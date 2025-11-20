@@ -1,0 +1,157 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container-fluid">
+    <div class="row">
+        <div class="col-lg-10 col-md-12 mx-auto">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h4 class="mb-0"><i class="bi bi-upload me-2"></i>Bulk Add Products via CSV (Auto-SKU)</h4>
+                </div>
+                <div class="card-body">
+                    <div class="alert alert-success">
+                        <strong><i class="bi bi-magic me-2"></i>Auto-SKU Generation Enabled!</strong><br>
+                        SKUs will be automatically generated based on product names. You don't need to provide SKUs in your CSV.
+                    </div>
+
+                    <h5 class="mb-3">📋 CSV Format</h5>
+                    <p>Your CSV file must have the following columns <strong>(SKU column is optional and will be ignored)</strong>:</p>
+                    <div class="card bg-light mb-4">
+                        <div class="card-body">
+                            <code class="fs-6">name, sale_price, cost_price, quantity, category (optional)</code>
+                        </div>
+                    </div>
+                    
+                    <div class="alert alert-info">
+                        <strong>💡 How Auto-SKU Works:</strong>
+                        <ul class="mb-0 mt-2">
+                            <li><strong>With Category:</strong> Uses category prefix → <code>TIR-00001</code>, <code>FIL-00001</code></li>
+                            <li><strong>Without Category:</strong> Auto-detects from name → <code>LEO-00001</code> (from "Leo tires")</li>
+                            <li><strong>Uniqueness:</strong> System ensures all SKUs are unique</li>
+                        </ul>
+                    </div>
+
+                    <form action="{{ url_for('core.inventory_bulk_add') }}" method="POST" enctype="multipart/form-data">
+                        <div class="mb-4">
+                            <label for="csv_file" class="form-label fw-bold">
+                                <i class="bi bi-file-earmark-spreadsheet me-2"></i>Select CSV File
+                            </label>
+                            <input class="form-control form-control-lg" type="file" id="csv_file" name="csv_file" accept=".csv" required>
+                            <div class="form-text">Maximum file size: 5MB</div>
+                        </div>
+
+                        <div class="d-grid gap-2">
+                            <button type="submit" class="btn btn-primary btn-lg">
+                                <i class="bi bi-upload me-2"></i> Upload and Auto-Generate SKUs
+                            </button>
+                            <a href="{{ url_for('core.inventory') }}" class="btn btn-outline-secondary">
+                                <i class="bi bi-arrow-left me-2"></i> Back to Inventory
+                            </a>
+                        </div>
+                    </form>
+                    
+                    <hr class="my-4">
+                    
+                    <h5><i class="bi bi-code-square me-2"></i>Example CSV Formats</h5>
+
+                    <ul class="nav nav-tabs mb-3" role="tablist">
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#automotive" type="button">
+                                🔧 Automotive
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#construction" type="button">
+                                🏗️ Construction
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#apparel" type="button">
+                                👗 Apparel
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#beauty" type="button">
+                                💄 Beauty
+                            </button>
+                        </li>
+                        <li class="nav-item" role="presentation">
+                            <button class="nav-link" data-bs-toggle="tab" data-bs-target="#foodbev" type="button">
+                                ☕ Food & Beverage
+                            </button>
+                        </li>
+                    </ul>
+
+                    <div class="tab-content">
+                        <!-- Automotive -->
+                        <div class="tab-pane fade show active" id="automotive">
+                            <pre class="bg-light p-3 rounded">name,sale_price,cost_price,quantity,category
+                    Leo Tires 205/55R16,1000.00,900.00,10,TIR
+                    Denso Air Filter,150.00,75.00,15,FIL
+                    Brake Pad Set,450.00,250.00,20,BRK
+                    Motolite Battery NS40,3500.00,2800.00,5,BAT</pre>
+                            <p class="text-muted"><strong>Generated SKUs:</strong> TIR-00001, FIL-00001, BRK-00001, BAT-00001</p>
+                        </div>
+                        
+                        <!-- Construction -->
+                        <div class="tab-pane fade" id="construction">
+                            <pre class="bg-light p-3 rounded">name,sale_price,cost_price,quantity,category
+                    Portland Cement 40kg,250.00,220.00,100,CEM
+                    White Sand per cubic,800.00,650.00,50,SND
+                    Marine Plywood 4x8,850.00,720.00,25,PLY
+                    Boysen Paint White 4L,1200.00,950.00,30,PNT</pre>
+                            <p class="text-muted"><strong>Generated SKUs:</strong> CEM-00001, SND-00001, PLY-00001, PNT-00001</p>
+                        </div>
+                        
+                        <!-- Apparel -->
+                        <div class="tab-pane fade" id="apparel">
+                            <pre class="bg-light p-3 rounded">name,sale_price,cost_price,quantity,category
+                    Floral Midi Dress Size S,599.00,350.00,15,DRS
+                    White Crop Top Size M,299.00,180.00,25,TOP
+                    High-Waist Jeans Size 28,799.00,450.00,20,PNT
+                    Gold Chain Necklace,199.00,120.00,30,ACC</pre>
+                            <p class="text-muted"><strong>Generated SKUs:</strong> DRS-00001, TOP-00001, PNT-00001, ACC-00001</p>
+                        </div>
+                        
+                        <!-- Beauty -->
+                        <div class="tab-pane fade" id="beauty">
+                            <pre class="bg-light p-3 rounded">name,sale_price,cost_price,quantity,category
+                    Cetaphil Gentle Cleanser 125ml,450.00,320.00,50,CLN
+                    Maybelline Lipstick Red,250.00,180.00,40,MKP
+                    Kojie San Soap,35.00,22.00,100,SKN
+                    Human Nature Toner 100ml,199.00,140.00,30,TON</pre>
+                            <p class="text-muted"><strong>Generated SKUs:</strong> CLN-00001, MKP-00001, SKN-00001, TON-00001</p>
+                        </div>
+                        
+                        <!-- Food & Beverage -->
+                        <div class="tab-pane fade" id="foodbev">
+                            <pre class="bg-light p-3 rounded">name,sale_price,cost_price,quantity,category
+                    Okinawa Milk Tea Large,75.00,35.00,0,MLK
+                    Spanish Latte Medium,65.00,30.00,0,COF
+                    Pearl Add-on,15.00,8.00,0,SIN
+                    16oz Clear Cup (100pcs),250.00,180.00,10,CUP</pre>
+                            <p class="text-muted"><strong>Generated SKUs:</strong> MLK-00001, COF-00001, SIN-00001, CUP-00001</p>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-success mt-3">
+                        <strong>💡 Pro Tip:</strong> Leave category column empty for auto-detection!
+                        System will intelligently assign categories based on product names.
+                    </div>
+
+                    <hr>
+
+                    <h6><i class="bi bi-tags me-2"></i>Category Prefix Reference</h6>
+                    <div class="row">
+                        {% for category_name, prefix in categories.items() %}
+                        <div class="col-md-3 col-sm-6 mb-2">
+                            <span class="badge bg-secondary">{{ prefix }}</span> - {{ category_name }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

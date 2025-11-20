@@ -1,0 +1,7 @@
+Flask
+Flask-SQLAlchemy
+Flask-Login
+passlib
+pandas
+Flask-Limiter
+Flask-WTF

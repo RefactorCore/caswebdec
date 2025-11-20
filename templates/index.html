@@ -1,0 +1,320 @@
+{% extends 'base.html' %}
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<style>
+.due-item-overdue { border-left: 4px solid #dc3545; background-color: #fff5f5; }
+.due-item-soon { border-left: 4px solid #ffc107; background-color: #fffbf0; }
+.due-item-upcoming { border-left: 4px solid #28a745; background-color: #f0fff4; }
+</style>
+
+<div class="container my-4">
+  <h2 class="mb-4">📊 Dashboard Overview</h2>
+
+  <!-- Existing Stats Cards -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-3">
+      <div class="card shadow-sm text-center border-primary">
+        <div class="card-body">
+          <h6 class="text-muted">Total Sales ({{ current_filter_label }})</h6>
+          <h4 class="text-success">₱{{ total_sales | round(2) }}</h4>
+          <!-- ✅ ADD THIS LINE -->
+          <small class="text-muted">Includes Cash (POS) + Credit (AR)</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="card shadow-sm text-center border-info">
+        <div class="card-body">
+          <h6 class="text-muted">Total Purchases ({{ current_filter_label }})</h6>
+          <h4 class="text-danger">₱{{ total_purchases | round(2) }}</h4>
+          <!-- ✅ ADD THIS LINE -->
+          <small class="text-muted">Includes Cash + Credit (AP)</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="card shadow-sm text-center border-warning">
+        <div class="card-body">
+          <h6 class="text-muted">Inventory Value</h6>
+          <h4>₱{{ total_inventory_value | round(2) }}</h4>
+          <!-- ✅ UPDATE THIS LINE -->
+          <small class="text-muted">{{ products_in_stock }} products (FIFO valued)</small>
+        </div>
+      </div>
+    </div>
+
+    <div class="col-md-3">
+      <div class="card shadow-sm text-center border-success">
+        <div class="card-body">
+          <h6 class="text-muted">Net Income ({{ current_filter_label }})</h6>
+          <h4 class="text-success">₱{{ net_income | round(2) }}</h4>
+          <!-- ✅ ADD THIS LINE -->
+          <small class="text-muted">Revenue - COGS - Expenses</small>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ✅ UPDATED: Due Dates Dashboard Widget (AR & AP) -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-12">
+      <div class="card shadow-sm">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+          <h5 class="mb-0"><i class="bi bi-calendar-event me-2"></i>📅 Upcoming Payments & Collections</h5>
+          <span class="badge bg-light text-dark">
+            {{ overdue_items|length + due_soon_items|length + upcoming_items|length }} items
+          </span>
+        </div>
+        <div class="card-body">
+          
+          <!-- Overdue Section -->
+          {% if overdue_items %}
+          <div class="mb-3">
+            <h6 class="text-danger fw-bold mb-2">
+              <i class="bi bi-exclamation-triangle-fill"></i> 🔴 OVERDUE ({{ overdue_items|length }})
+            </h6>
+            {% for item in overdue_items %}
+            <div class="card mb-2 due-item-overdue">
+              <div class="card-body py-2">
+                <div class="row align-items-center">
+                  <div class="col-md-2">
+                    {% if item.direction == 'receivable' %}
+                    <span class="badge bg-success">{{ item.type }} ↓ IN</span>
+                    {% else %}
+                    <span class="badge bg-danger">{{ item.type }} ↑ OUT</span>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-3">
+                    <strong>{{ item.number }}</strong><br>
+                    <small class="text-muted">
+                      {% if item.direction == 'receivable' %}
+                      Customer: {{ item.party }}
+                      {% else %}
+                      Supplier: {{ item.party }}
+                      {% endif %}
+                    </small>
+                    {% if item.description %}
+                    <br><small class="text-muted fst-italic">{{ item.description }}</small>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-2">
+                    <strong class="text-danger">₱{{ "%.2f"|format(item.amount) }}</strong>
+                  </div>
+                  <div class="col-md-3">
+                    <small>Due: {{ item.due_date.strftime('%Y-%m-%d') }}</small><br>
+                    <span class="badge bg-danger">{{ abs(item.days_until_due) }} days overdue</span>
+                  </div>
+                  <div class="col-md-2 text-end">
+                    <a href="{{ item.url }}" class="btn btn-sm btn-outline-danger">
+                      {% if item.direction == 'receivable' %}
+                      <i class="bi bi-cash-coin"></i> Collect
+                      {% else %}
+                      <i class="bi bi-credit-card"></i> Pay
+                      {% endif %}
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <!-- Due Soon Section -->
+          {% if due_soon_items %}
+          <div class="mb-3">
+            <h6 class="text-warning fw-bold mb-2">
+              <i class="bi bi-clock-fill"></i> 🟡 DUE SOON ({{ due_soon_items|length }})
+            </h6>
+            {% for item in due_soon_items %}
+            <div class="card mb-2 due-item-soon">
+              <div class="card-body py-2">
+                <div class="row align-items-center">
+                  <div class="col-md-2">
+                    {% if item.direction == 'receivable' %}
+                    <span class="badge bg-success">{{ item.type }} ↓ IN</span>
+                    {% else %}
+                    <span class="badge bg-warning text-dark">{{ item.type }} ↑ OUT</span>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-3">
+                    <strong>{{ item.number }}</strong><br>
+                    <small class="text-muted">
+                      {% if item.direction == 'receivable' %}
+                      Customer: {{ item.party }}
+                      {% else %}
+                      Supplier: {{ item.party }}
+                      {% endif %}
+                    </small>
+                    {% if item.description %}
+                    <br><small class="text-muted fst-italic">{{ item.description }}</small>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-2">
+                    <strong class="text-warning">₱{{ "%.2f"|format(item.amount) }}</strong>
+                  </div>
+                  <div class="col-md-3">
+                    <small>Due: {{ item.due_date.strftime('%Y-%m-%d') }}</small><br>
+                    <span class="badge bg-warning text-dark">{{ item.days_until_due }} days</span>
+                  </div>
+                  <div class="col-md-2 text-end">
+                    <a href="{{ item.url }}" class="btn btn-sm btn-outline-warning">
+                      <i class="bi bi-arrow-right"></i> View
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <!-- Upcoming Section -->
+          {% if upcoming_items %}
+          <div class="mb-2">
+            <h6 class="text-success fw-bold mb-2">
+              <i class="bi bi-calendar-check-fill"></i> 🟢 UPCOMING ({{ upcoming_items|length }})
+            </h6>
+            {% for item in upcoming_items %}
+            <div class="card mb-2 due-item-upcoming">
+              <div class="card-body py-2">
+                <div class="row align-items-center">
+                  <div class="col-md-2">
+                    {% if item.direction == 'receivable' %}
+                    <span class="badge bg-success">{{ item.type }} ↓ IN</span>
+                    {% else %}
+                    <span class="badge bg-success">{{ item.type }} ↑ OUT</span>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-3">
+                    <strong>{{ item.number }}</strong><br>
+                    <small class="text-muted">
+                      {% if item.direction == 'receivable' %}
+                      Customer: {{ item.party }}
+                      {% else %}
+                      Supplier: {{ item.party }}
+                      {% endif %}
+                    </small>
+                    {% if item.description %}
+                    <br><small class="text-muted fst-italic">{{ item.description }}</small>
+                    {% endif %}
+                  </div>
+                  <div class="col-md-2">
+                    <strong>₱{{ "%.2f"|format(item.amount) }}</strong>
+                  </div>
+                  <div class="col-md-3">
+                    <small>Due: {{ item.due_date.strftime('%Y-%m-%d') }}</small><br>
+                    <span class="badge bg-success">{{ item.days_until_due }} days</span>
+                  </div>
+                  <div class="col-md-2 text-end">
+                    <a href="{{ item.url }}" class="btn btn-sm btn-outline-success">
+                      <i class="bi bi-arrow-right"></i> View
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
+          <!-- No Items Message -->
+          {% if not overdue_items and not due_soon_items and not upcoming_items %}
+          <div class="alert alert-info text-center mb-0">
+            <i class="bi bi-check-circle" style="font-size: 2rem;"></i>
+            <p class="mb-0 mt-2">🎉 All caught up! No upcoming due dates.</p>
+          </div>
+          {% endif %}
+
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- ✅ END OF UPDATED WIDGET -->
+
+  <!-- Existing Charts and Tables -->
+  <div class="row g-3 mb-4">
+    <div class="col-md-8">
+        <div class="card shadow-sm h-100">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5 class="card-title mb-0">Sales Trend ({{ current_filter_label }})</h5>
+                    <div>
+                        <a href="{{ url_for('core.index', period='all') }}" 
+                           class="btn btn-sm {% if current_period_filter == 'all' %}btn-primary{% else %}btn-outline-secondary{% endif %}">All Time</a>
+                        <a href="{{ url_for('core.index', period='12') }}" 
+                           class="btn btn-sm {% if current_period_filter == '12' %}btn-primary{% else %}btn-outline-secondary{% endif %}">12H</a>
+                        <a href="{{ url_for('core.index', period='7') }}" 
+                           class="btn btn-sm {% if current_period_filter == '7' %}btn-primary{% else %}btn-outline-secondary{% endif %}">7D</a>
+                        <a href="{{ url_for('core.index', period='30') }}" 
+                           class="btn btn-sm {% if current_period_filter == '30' %}btn-primary{% else %}btn-outline-secondary{% endif %}">30D</a>
+                    </div>
+                </div>
+                <canvas id="salesChart" height="100"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card shadow-sm h-100">
+            <div class="card-header bg-warning text-dark fw-bold">
+                <i class="bi bi-star-fill me-2"></i>Top 10 Selling Products
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush">
+                    {% for name, qty in top_sellers %}
+                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                            {{ name }}
+                            <span class="badge bg-primary rounded-pill">{{ qty }} units sold</span>
+                        </li>
+                    {% else %}
+                        <li class="list-group-item text-muted">No sales data recorded yet.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+  </div>
+
+  <!-- Low Stock Alerts -->
+  <h5 class="mt-4">⚠️ Low Stock Alerts</h5>
+  <ul class="list-group">
+    {% for p in low_stock %}
+      <li class="list-group-item d-flex justify-content-between align-items-center">
+        {{ p.name }}
+        <span class="badge bg-danger">{{ p.quantity }}</span>
+      </li>
+    {% else %}
+      <li class="list-group-item text-muted">No low stock items.</li>
+    {% endfor %}
+  </ul>
+</div>
+
+<script>
+const ctx = document.getElementById('salesChart').getContext('2d');
+new Chart(ctx, {
+  type: 'line',
+  data: {
+    labels: {{ labels|tojson }},
+    datasets: [{
+      label: 'Daily Sales (₱)',
+      data: {{ sales_by_day|tojson }},
+      fill: true,
+      borderColor: 'rgba(54,162,235,1)',
+      backgroundColor: 'rgba(54,162,235,0.2)',
+      tension: 0.3,
+      pointRadius: 4,
+      pointBackgroundColor: 'rgba(54,162,235,1)'
+    }]
+  },
+  options: {
+    plugins: { legend: { display: false } },
+    scales: { y: { beginAtZero: true } }
+  }
+});
+</script>
+{% endblock %}

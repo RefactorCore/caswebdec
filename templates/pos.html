@@ -1,0 +1,939 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  /* Global reset for POS view */
+  .sidebar, header { display: none !important; }
+  body, .main-content {
+    margin: 0 !important;
+    padding: 0 !important;
+    background-color: #f5f7fb;
+    color: #212529;
+    font-family: "Inter", system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+  }
+
+  /* Layout */
+  .pos-container {
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+  }
+  .pos-header {
+    background: linear-gradient(90deg,#0d6efd,#0b5ed7);
+    color: #fff;
+    padding: 14px 22px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    box-shadow: 0 2px 6px rgba(11, 30, 85, 0.08);
+  }
+  .pos-body {
+    flex: 1;
+    display: flex;
+    gap: 0;
+    overflow: hidden;
+  }
+
+  /* Products panel */
+  .pos-products {
+    flex: 2;
+    padding: 18px;
+    overflow-y: auto;
+    background: #fff;
+    border-right: 1px solid #e6e9ef;
+  }
+  .product-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .product-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill,minmax(170px,1fr));
+    gap: 12px;
+  }
+  .product-card {
+    background: #fff;
+    border: 1px solid #e9eef6;
+    border-radius: 10px;
+    padding: 12px;
+    text-align: left;
+    cursor: pointer;
+    transition: transform .12s ease, box-shadow .12s ease;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    min-height: 90px;
+  }
+  .product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 6px 18px rgba(12,40,80,0.06);
+    background: #fbfdff;
+  }
+  .product-card .name { font-weight: 600; font-size: 0.95rem; }
+  .product-card .sku { color: #6c757d; font-size: 0.82rem; }
+  .price-badge {
+    margin-top: auto;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+  }
+  .badge-price {
+    background: linear-gradient(180deg,#28a745,#218838);
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 8px;
+    font-weight: 700;
+  }
+  .product-quantity {
+    background: #fff3cd;
+    color: #856404;
+    padding: 4px 8px;
+    border-radius: 8px;
+    font-size: 0.78rem;
+    border: 1px solid #ffeeba;
+  }
+
+  /* Cart panel */
+  .pos-cart {
+    flex: 1;
+    background-color: #f8f9fb;
+    padding: 18px;
+    display: flex;
+    flex-direction: column;
+  }
+  .cart-top {
+    display:flex;
+    gap:8px;
+    align-items:center;
+    margin-bottom: 12px;
+  }
+  .cart-list {
+    flex: 1;
+    overflow-y: auto;
+    background: #fff;
+    border-radius: 8px;
+    padding: 10px;
+    border: 1px solid #e6e9ef;
+  }
+  .cart-item {
+    display:flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px;
+    border-bottom: 1px dashed #eceff5;
+    gap: 8px;
+  }
+  .cart-item:last-child { border-bottom: none; }
+  .cart-item .meta { display:flex; flex-direction: column; gap:3px; max-width: 60%; }
+  .cart-item .meta strong { font-weight: 600; font-size: 0.95rem; }
+  .cart-item .qty-controls { display:flex; gap:6px; align-items:center; }
+  .small-btn { padding: 4px 8px; font-size: 0.85rem; border-radius: 6px; }
+
+  /* Checkout summary */
+  .summary {
+    margin-top: 12px;
+    padding: 12px;
+    background: linear-gradient(180deg,#fff,#f8fbff);
+    border-radius: 8px;
+    border: 1px solid #e6e9ef;
+  }
+  .summary-row {
+    display:flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 0.95rem;
+  }
+  .summary-row strong { font-size: 1.05rem; }
+  .checkout-actions { display:flex; gap:10px; margin-top:8px; }
+  .btn-wide { flex:1; }
+  
+  /* */
+  .btn-sc-pwd.active {
+    background-color: #0d6efd;
+    color: #fff;
+    border-color: #0d6efd;
+  }
+
+  /* Modals and receipt */
+  #calcModal .modal-content { border-radius: 12px; }
+  #receiptModal .modal-dialog { max-width: 480px; }
+  #receiptTemplate {
+    font-family: 'Courier New', Courier, monospace;
+    background: #fffdfa;
+    border: 1px dashed #d1d1d1;
+    padding: 12px;
+    font-size: 13px;
+    color: #000;
+  }
+  .receipt-header h5 { margin:0; font-weight:700; text-transform: uppercase; }
+  .receipt-field { display:flex; justify-content: space-between; margin-bottom:6px; border-bottom: 1px dotted #ddd; padding-bottom:4px; }
+  .receipt-items-header { display:flex; justify-content:space-between; font-weight:700; border-bottom:1px solid #ddd; padding-bottom:6px; margin-top:8px; }
+  .receipt-item { display:flex; justify-content:space-between; margin-top:6px; }
+  .receipt-totals { margin-top:10px; }
+  .receipt-totals div { display:flex; justify-content:space-between; margin-bottom:4px; }
+
+  /* Responsive tweaks */
+  @media (max-width: 900px) {
+    .pos-body { flex-direction: column; }
+    .pos-products, .pos-cart { flex: none; width: 100%; }
+  }
+
+</style>
+
+<div class="pos-container">
+  <div class="pos-header">
+    <div style="display:flex; align-items:center; gap:12px;">
+      <i class="bi bi-cart3" style="font-size:1.45rem;"></i>
+      <div>
+        <div style="font-weight:700; font-size:1.05rem;">Point of Sale</div>
+        <small class="text-light" style="opacity:.85">Fast sales | Simple receipts</small>
+      </div>
+    </div>
+    <div style="display:flex; gap:8px; align-items:center;">
+      <a href="{{ url_for('core.index') }}" class="btn btn-light btn-sm">
+        <i class="bi bi-box-arrow-left me-1"></i> Exit POS
+      </a>
+    </div>
+  </div>
+
+  <div class="pos-body">
+    <div class="pos-products">
+      <form id="posSearchForm" method="GET" action="{{ url_for('core.pos') }}" class="mb-3">
+        <div class="product-controls">
+          <div style="display:flex; gap:8px; align-items:center;">
+            <h5 style="margin:0;">Products</h5>
+            <small class="text-muted">Tap a product to add / edit quantity</small>
+          </div>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <div class="input-group" style="width:320px;">
+              <input type="text" name="search" value="{{ search }}" class="form-control form-control-sm" placeholder="Search product..." aria-label="Search product">
+              <button type="submit" class="btn btn-sm btn-primary" aria-label="Search">
+                <i class="bi bi-search"></i>
+              </button>
+            </div>
+          </div>
+        </div>
+      </form>
+
+      <div id="productGrid" class="product-grid">
+        {% for p in products %}
+        <div class="product-card" 
+             data-sku="{{ p.sku }}" 
+             data-name="{{ p.name }}" 
+             data-price="{{ p.price }}" 
+             data-stock="{{ p.quantity }}"
+             data-is-consignment="{{ p.is_consignment|lower }}"
+             data-consignment-id="{{ p.consignment_id if p.is_consignment else '' }}"
+             data-item-id="{{ p.id }}">
+          <div class="name">{{ p.name }}</div>
+          <div class="sku">{{ p.sku }}</div>
+          {% if p.is_consignment %}
+          <div class="mb-1">
+            <span class="badge" style="background: linear-gradient(135deg, #f39c12, #e67e22); color: white; font-size: 0.7rem;">
+              <i class="bi bi-box2-heart"></i> CONSIGNED
+            </span>
+          </div>
+          {% endif %}
+          <div class="price-badge">
+            <div class="badge-price" style="{% if p.is_consignment %}background: linear-gradient(180deg, #f39c12, #e67e22);{% endif %}">
+              ₱{{ "%.2f"|format(p.price) }}
+            </div>
+            <div class="product-quantity">Stock: {{ p.quantity }}</div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+
+      {% include '_pagination.html' %}
+    </div>
+
+    <div class="pos-cart">
+      <div class="cart-top">
+        <div style="flex:1">
+          <h6 style="margin:0; font-weight:700;">Current Sale</h6>
+          <small class="text-muted">Invoice · Quick checkout</small>
+        </div>
+      </div>
+
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <input id="customerName" class="form-control form-control-sm" placeholder="Customer name (optional)" value="" aria-label="Customer name">
+      </div>
+      
+      <div style="display:flex; gap:8px; margin-bottom:10px;">
+        <select id="discountType" class="form-select form-select-sm" style="width:130px;">
+          <option value="percent">Discount %</option>
+          <option value="fixed">Fixed ₱</option>
+        </select>
+        <input id="discountValue" class="form-control form-control-sm" placeholder="0" value="0" style="width:100px;" aria-label="Discount value">
+        
+        <button id="scPwdButton" class="btn btn-sm btn-outline-primary btn-sc-pwd" style="flex:1; white-space: nowrap;">
+          Senior / PWD
+        </button>
+      </div>
+
+
+      <div class="cart-list" id="cartList" aria-live="polite"></div>
+
+      <div class="summary" aria-hidden="false">
+        <div class="summary-row"><span>Subtotal</span><span id="subtotalText">₱0.00</span></div>
+        <div class="summary-row"><span>Discount</span><span id="discountText">₱0.00</span></div>
+        <div class="summary-row"><span>VATable Sales</span><span id="vatableText">₱0.00</span></div>
+        <div class="summary-row"><span>VAT (12%)</span><span id="vatText">₱0.00</span></div>
+        <div class="summary-row" style="margin-top:8px;"><strong>TOTAL</strong><strong id="total">₱0.00</strong></div>
+
+        <div class="form-check mt-2">
+          <input class="form-check-input" type="checkbox" value="1" id="saleIsVatable">
+          <label class="form-check-label" for="saleIsVatable" style="font-size:0.9rem;">
+            Vatable sale (12%) - Click for VAT sale
+          </label>
+        </div>
+
+        <div class="checkout-actions">
+          <button id="checkoutBtn" class="btn btn-primary btn-wide">
+            <i class="bi bi-cash-coin me-1"></i> Checkout
+          </button>
+          <button id="clearCartBtn" class="btn btn-outline-secondary" title="Clear cart">
+            <i class="bi bi-trash"></i>
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="qtyModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="qtyModalLabel">Enter Quantity</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <label for="qtyInput" class="form-label">Quantity:</label>
+        <input type="number" class="form-control" id="qtyInput" value="1" min="0">
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-primary" id="saveQtyBtn">Add to Cart</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="calcModal" tabindex="-1">
+  <div class="modal-dialog modal-sm modal-dialog-centered">
+    <div class="modal-content shadow-lg border-0" style="border-radius: 1rem;">
+      <div class="modal-body p-4">
+        <h5 class="text-center text-primary fw-bold mb-3">Enter Cash Tendered</h5>
+        <input type="text" id="cashInput" class="form-control form-control-lg text-end FS-3 mb-3" readonly placeholder="0.00" aria-label="Cash tendered">
+        <div class="container-fluid p-0">
+          <div class="row g-2">
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('7')">7</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('8')">8</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('9')">9</button></div>
+          </div>
+          <div class="row g-2 mt-1">
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('4')">4</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('5')">5</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('6')">6</button></div>
+          </div>
+          <div class="row g-2 mt-1">
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('1')">1</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('2')">2</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('3')">3</button></div>
+          </div>
+          <div class="row g-2 mt-1">
+            <div class="col-4"><button class="btn btn-lg btn-outline-warning w-100 py-3" onclick="press('C')">C</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('0')">0</button></div>
+            <div class="col-4"><button class="btn btn-lg btn-outline-secondary w-100 py-3" onclick="press('.')">.</button></div>
+          </div>
+          <div class="row g-2 mt-3">
+             <div class="col-12">
+               <button class="btn btn-lg btn-success w-100 py-3" onclick="finishCheckout()">
+                 <i class="bi bi-check-lg"></i> OK
+               </button>
+             </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="modal fade" id="receiptModal" tabindex="-1">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title">Receipt</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="receiptTemplate"></div>
+      </div>
+      <div class="modal-footer justify-content-between">
+        <button type="button" class="btn btn-outline-secondary" id="printReceiptBtn">
+          <i class="bi bi-printer"></i> Print
+        </button>
+        <button type="button" class="btn btn-primary" data-bs-dismiss="modal">
+          <i class="bi bi-check-lg"></i> Done
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+
+  let cart = [];
+  let lastReceiptId = null;
+  let isScPwdDiscount = false;
+
+  // Modal refs
+  const qtyModalEl = document.getElementById('qtyModal');
+  const qtyModal = new bootstrap.Modal(qtyModalEl);
+  const calcModalEl = document.getElementById('calcModal');
+
+  // Elements
+  const cartListEl = document.getElementById('cartList');
+  const subtotalText = document.getElementById('subtotalText');
+  const discountText = document.getElementById('discountText');
+  const totalText = document.getElementById('total');
+  const vatableText = document.getElementById('vatableText');
+  const vatText = document.getElementById('vatText');
+  const saleIsVatableEl = document.getElementById('saleIsVatable');
+  const discountTypeEl = document.getElementById('discountType');
+  const discountValueEl = document.getElementById('discountValue');
+  const customerNameEl = document.getElementById('customerName');
+  const scPwdButton = document.getElementById('scPwdButton');
+
+  // Reusable formatting
+  function fmt(n) { return '₱' + (n || 0).toFixed(2); }
+  function round2(n){ return Math.round((n + Number.EPSILON) * 100) / 100; }
+
+  // Compute discount value based on type (applies to GROSS subtotal)
+  function computeDiscount(subtotalGross) {
+    if (isScPwdDiscount) {
+      return 0; // UI defers to server for SC/PWD accurate discount
+    }
+
+    const type = discountTypeEl.value;
+    const raw = parseFloat(discountValueEl.value || 0) || 0;
+    if (raw <= 0) return 0;
+    if (type === 'percent') {
+      const pct = Math.min(100, Math.max(0, raw));
+      return round2(subtotalGross * (pct / 100));
+    } else {
+      // fixed amount
+      return Math.min(subtotalGross, raw);
+    }
+  }
+
+  // Render cart UI and totals (VAT-INCLUSIVE pricing)
+  function renderCart() {
+    cartListEl.innerHTML = '';
+    let subtotalGross = 0;
+
+    cart.forEach((item, idx) => {
+      subtotalGross += item.price * item.qty;
+
+      const row = document.createElement('div');
+      row.className = 'cart-item';
+
+      const meta = document.createElement('div');
+      meta.className = 'meta';
+      const name = document.createElement('strong');
+      name.textContent = item.name;
+      const sku = document.createElement('small');
+      sku.textContent = item.sku + ' · ' + (item.qty + ' × ' + fmt(item.price)).replace('₱', '');
+
+      meta.append(name, sku);
+
+      const right = document.createElement('div');
+      right.style.display = 'flex';
+      right.style.gap = '6px';
+      right.style.alignItems = 'center';
+
+      const qtyControls = document.createElement('div');
+      qtyControls.className = 'qty-controls';
+      const minus = document.createElement('button');
+      minus.className = 'btn btn-sm btn-outline-secondary small-btn';
+      minus.innerHTML = '<i class="bi bi-dash"></i>';
+      minus.addEventListener('click', () => changeQty(idx, Math.max(0, item.qty - 1)));
+      const qtyLabel = document.createElement('span');
+      qtyLabel.textContent = item.qty;
+      qtyLabel.style.minWidth = '28px';
+      qtyLabel.style.textAlign = 'center';
+      const plus = document.createElement('button');
+      plus.className = 'btn btn-sm btn-outline-secondary small-btn';
+      plus.innerHTML = '<i class="bi bi-plus"></i>';
+      plus.addEventListener('click', () => changeQty(idx, item.qty + 1));
+      qtyControls.append(minus, qtyLabel, plus);
+
+      const price = document.createElement('div');
+      price.style.minWidth = '70px';
+      price.style.textAlign = 'right';
+      price.innerHTML = fmt(item.price * item.qty);
+
+      const del = document.createElement('button');
+      del.className = 'btn btn-sm btn-outline-danger small-btn';
+      del.title = 'Remove';
+      del.innerHTML = '<i class="bi bi-trash"></i>';
+      del.addEventListener('click', () => removeItem(idx));
+
+      right.append(qtyControls, price, del);
+
+      row.append(meta, right);
+      cartListEl.append(row);
+    });
+
+    const subtotal = round2(subtotalGross);
+    let discount = 0;
+    let discountedGross = subtotal;
+    
+    // VAT_RATE from server config
+    const VAT_RATE = {{ (config.VAT_RATE) }}; 
+
+    let vatAmount = 0;
+    let vatableSalesNet = discountedGross;
+
+    if (isScPwdDiscount) {
+        saleIsVatableEl.checked = true;
+        saleIsVatableEl.disabled = true;
+        
+        discountTypeEl.disabled = true;
+        discountValueEl.disabled = true;
+        discountValueEl.value = '20';
+        discountTypeEl.value = 'percent';
+        scPwdButton.classList.add('active');
+
+        // Approximate UI numbers (server will determine authoritative values)
+        const netBase = round2(subtotalGross / (1 + VAT_RATE));
+        discount = round2(netBase * 0.20);
+        discountedGross = round2(netBase - discount);
+        vatableSalesNet = discountedGross;
+        vatAmount = 0.00;
+    } else {
+        discount = computeDiscount(subtotalGross);
+        discountedGross = round2(Math.max(0, subtotalGross - discount));
+        saleIsVatableEl.disabled = false;
+        discountTypeEl.disabled = false;
+        discountValueEl.disabled = false;
+        scPwdButton.classList.remove('active');
+
+        const isVatable = saleIsVatableEl.checked;
+        if (isVatable) {
+          vatAmount = round2(discountedGross * (VAT_RATE / (1 + VAT_RATE)));
+          vatableSalesNet = round2(discountedGross - vatAmount);
+        } else {
+          vatAmount = 0;
+          vatableSalesNet = discountedGross;
+        }
+    }
+
+    const total = round2(discountedGross);
+
+    subtotalText.innerText = fmt(subtotal);
+    discountText.innerText = fmt(discount);
+    vatableText.innerText = fmt(vatableSalesNet);
+    vatText.innerText = fmt(vatAmount);
+    totalText.innerText = fmt(total);
+  }
+
+  // Cart manipulation helpers
+  function changeQty(index, qty) {
+    if (qty <= 0) {
+      cart.splice(index, 1);
+    } else {
+      const productCard = document.querySelector(`.product-card[data-sku="${cart[index].sku}"]`);
+      const stock = parseInt(productCard?.dataset.stock || '0', 10);
+      if (qty > stock) {
+        alert(`Not enough stock. Only ${stock} available.`);
+        return;
+      }
+      cart[index].qty = qty;
+    }
+    renderCart();
+  }
+
+  window.removeItem = function(i) {
+    cart.splice(i, 1);
+    renderCart();
+  }
+
+  // Product card click
+  document.querySelectorAll('.product-card').forEach(el => {
+    el.addEventListener('click', () => {
+        const sku = el.dataset.sku;
+        const name = el.dataset.name;
+        const price = parseFloat(el.dataset.price);
+        const stock = parseInt(el.dataset.stock || '0', 10);
+        const isConsignment = el.dataset.isConsignment === 'true';
+        const consignmentId = el.dataset.consignmentId || '';
+        const itemId = parseInt(el.dataset.itemId);
+
+        const existing = cart.find(i => i.sku === sku);
+
+        if (existing) {
+            return;
+        }
+
+        if (stock <= 0) {
+            alert(`"${name}" is out of stock.`);
+            return;
+        }
+
+        cart.push({ 
+            sku, 
+            name, 
+            price, 
+            qty: 1,
+            is_consignment: isConsignment,
+            consignment_id: consignmentId,
+            consignment_item_id: itemId
+        });
+        renderCart();
+    });
+});
+
+  // Save quantity in modal
+  document.getElementById('saveQtyBtn').addEventListener('click', function() {
+    const newQty = parseInt(document.getElementById('qtyInput').value, 10);
+    const sku = this.dataset.sku;
+    const name = this.dataset.name;
+    const price = parseFloat(this.dataset.price);
+    const stock = parseInt(this.dataset.stock, 10);
+
+    if (isNaN(newQty) || newQty < 0) {
+      alert('Please enter a valid quantity.');
+      return;
+    }
+    if (newQty > stock) {
+      alert(`Not enough stock. Only ${stock} available.`);
+      return;
+    }
+
+    const idx = cart.findIndex(i => i.sku === sku);
+    if (newQty === 0) {
+      if (idx > -1) cart.splice(idx, 1);
+    } else {
+      if (idx > -1) cart[idx].qty = newQty;
+      else cart.push({ sku, name, price, qty: newQty });
+    }
+
+    qtyModal.hide();
+    renderCart();
+  });
+
+  // Clear cart button
+  document.getElementById('clearCartBtn').addEventListener('click', function() {
+    if (!cart.length) return;
+    if (!confirm('Clear all items from cart?')) return;
+    cart = [];
+    isScPwdDiscount = false;
+    discountValueEl.value = '0';
+    renderCart();
+  });
+
+  // Input/button global functions for calculator
+  window.press = function(val) {
+    const inp = document.getElementById('cashInput');
+    if (!inp) return;
+    if (val === 'C') inp.value = '';
+    else inp.value += val;
+  }
+
+  // Checkout button
+  document.getElementById('checkoutBtn').addEventListener('click', () => {
+    if (cart.length === 0) return alert('No items in cart.');
+    const modal = new bootstrap.Modal(calcModalEl);
+    modal.show();
+  });
+
+  // Finish checkout: send sale to server
+  window.finishCheckout = async function() {
+    renderCart(); // make sure UI totals are up to date
+
+    const totalStr = document.getElementById('total').innerText.replace('₱','') || '0';
+    const total = parseFloat(totalStr);
+    const cash = parseFloat((document.getElementById('cashInput').value || '0')) || 0;
+
+    if (isNaN(cash) || cash < total) {
+      alert('Insufficient cash.');
+      return;
+    }
+
+    const customerName = (customerNameEl.value || '').trim() || 'Walk-in';
+    const selectedDocType = 'Invoice';
+    const saleIsVatable = saleIsVatableEl.checked;
+
+    let discountPayload;
+    if (isScPwdDiscount) {
+        discountPayload = {
+            type: 'sc_pwd',
+            input_value: 20
+        };
+    } else {
+        discountPayload = {
+            type: discountTypeEl.value,
+            input_value: parseFloat(discountValueEl.value || 0) || 0
+        };
+    }
+    
+    const subtotal = parseFloat(subtotalText.innerText.replace('₱','')) || 0;
+    const discountValue = parseFloat(discountText.innerText.replace('₱','')) || 0;
+    const vatValue = parseFloat(vatText.innerText.replace('₱','')) || 0;
+
+    const payload = {
+      items: cart,
+      doc_type: selectedDocType,
+      is_vatable: saleIsVatable,
+      discount: discountPayload,
+      totals: {
+        subtotal: subtotal,
+        discount: discountValue,
+        vat: vatValue,
+        total: total,
+        cash: cash,
+        change: cash - total
+      },
+      customer_name: customerName
+    };
+
+    try {
+      const response = await fetch('/api/sale', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await response.json();
+
+      if (data.status === 'ok') {
+        const change = cash - total;
+        lastReceiptId = data.receipt_number || data.sale_id || null;
+
+        // Normalize server fields
+        const serverTotal = Number(data.total);
+        const serverVat = Number(data.vat);
+        const serverDiscount = Number(data.discount_value);
+        const serverVatable = Number(data.vatable_sales);
+
+        // compute cartGross locally (gross prices as shown in UI)
+        const cartGross = cart.reduce((s,i) => s + (Number(i.price) || 0) * (i.qty || 0), 0);
+        const VAT_RATE = {{ (config.VAT_RATE) }};
+
+        // Prepare final receipt numbers (prefer server values when sane; otherwise compute sensible fallbacks)
+        let receiptTotal, receiptVat, receiptDiscount, receiptVatableSales, receiptSubtotal;
+
+        if (Number.isFinite(serverTotal) && serverTotal > 0) {
+          // Server gave us a sensible total - trust it, fill in other fields with fallbacks
+          receiptTotal = serverTotal;
+          receiptVat = Number.isFinite(serverVat) ? serverVat : 0;
+          receiptDiscount = Number.isFinite(serverDiscount) ? serverDiscount : 0;
+
+          // If server provided vatable sales, use it. Otherwise compute pre-discount subtotal as:
+          receiptSubtotal = receiptTotal + receiptDiscount - receiptVat;
+          if (Number.isFinite(serverVatable)) {
+            receiptVatableSales = serverVatable;
+          } else {
+            receiptVatableSales = receiptSubtotal - receiptVat;
+          }
+        } else {
+          // Server total missing or zero -> compute locally to avoid negative/wrong figures
+          if (data.discount && data.discount.type === 'sc_pwd') {
+            // SC/PWD calculation: discount is 20% of net base, VAT is 0
+            const netBase = round2(cartGross / (1 + VAT_RATE));
+            receiptDiscount = round2(netBase * 0.20);
+            receiptVat = 0;
+            receiptTotal = round2(netBase - receiptDiscount);
+            receiptVatableSales = receiptTotal;
+            receiptSubtotal = netBase;
+          } else {
+            // Standard fallback: use cart gross and client-side discount computation (or server discount if provided)
+            receiptDiscount = Number.isFinite(serverDiscount) && serverDiscount > 0 ? serverDiscount : computeDiscount(cartGross);
+            const discountedGross = round2(cartGross - receiptDiscount);
+            receiptTotal = round2(discountedGross);
+            if (saleIsVatable) {
+              receiptVat = round2(discountedGross * (VAT_RATE / (1 + VAT_RATE)));
+              receiptVatableSales = round2(discountedGross - receiptVat);
+            } else {
+              receiptVat = 0;
+              receiptVatableSales = receiptTotal;
+            }
+            receiptSubtotal = round2(cartGross);
+          }
+        }
+
+        // Ensure numeric safety
+        receiptTotal = Number(receiptTotal) || 0;
+        receiptVat = Number(receiptVat) || 0;
+        receiptDiscount = Number(receiptDiscount) || 0;
+        receiptVatableSales = Number(receiptVatableSales) || 0;
+        receiptSubtotal = Number(receiptSubtotal) || (receiptTotal + receiptDiscount - receiptVat);
+
+        const receipt = generateReceipt(cart, receiptSubtotal, receiptDiscount, receiptVat, receiptTotal, cash, change, lastReceiptId, customerName);
+        document.getElementById('receiptTemplate').innerHTML = receipt;
+        new bootstrap.Modal(document.getElementById('receiptModal')).show();
+
+        updateStockOnPage(cart);
+        // clear cart AFTER reading it for stock updates
+        cart = [];
+        isScPwdDiscount = false;
+        discountValueEl.value = '0';
+        
+        renderCart();
+        document.getElementById('cashInput').value = '';
+        bootstrap.Modal.getInstance(calcModalEl).hide();
+      } else {
+        alert(data.error || 'Error during checkout.');
+      }
+    } catch (err) {
+      console.error(err);
+      alert('Network error during checkout.');
+    }
+  }
+
+  // Update stock numbers on product cards after sale
+  function updateStockOnPage(cartItems) {
+    for (const item of cartItems) {
+      const productCard = document.querySelector(`.product-card[data-sku="${item.sku}"]`);
+      if (productCard) {
+        const qtySpan = productCard.querySelector('.product-quantity');
+        if (qtySpan) {
+          const currentQtyText = qtySpan.textContent.replace('Stock: ', '').trim();
+          let currentQty = parseInt(currentQtyText, 10);
+          if (!isNaN(currentQty)) {
+            let newQty = Math.max(0, currentQty - item.qty);
+            qtySpan.textContent = `Stock: ${newQty}`;
+            productCard.dataset.stock = newQty;
+          }
+        }
+      }
+    }
+  }
+
+  window.currentUserName = {{ (current_user_name or '')|tojson }};
+
+  // Generate a printable receipt (HTML)
+  function generateReceipt(cart, subtotal, discountValue, vatAmount, total, cash, change, receiptNumber, customerName) {
+    // Prefer the values currently shown in the UI so the receipt matches checkout.
+    function readMoneyFromEl(id, fallback) {
+      try {
+        const el = document.getElementById(id);
+        if (el && el.innerText) {
+          // strip non-numeric characters (including the currency symbol) and parse
+          const v = parseFloat(el.innerText.replace(/[^0-9\.\-]/g, ''));
+          if (!isNaN(v)) return v;
+        }
+      } catch (e) {
+        // ignore and fallback
+      }
+      return (Number(fallback) || 0);
+    }
+
+    // Use UI-displayed totals when available (this keeps receipt consistent with checkout)
+    const uiTotal = readMoneyFromEl('total', total);
+    const uiDiscount = readMoneyFromEl('discountText', discountValue);
+    const uiVat = readMoneyFromEl('vatText', vatAmount);
+    const uiVatable = readMoneyFromEl('vatableText', subtotal); // vatable sales shown in UI
+    // Compute pre-discount subtotal for display purposes (Total + Discount)
+    const preDiscountTotal = round2(uiTotal + uiDiscount);
+
+    // Ensure numeric safety
+    const receiptSubtotal = Number(preDiscountTotal) || 0; // Pre-discount gross-like number
+    const receiptDiscount = Number(uiDiscount) || 0;
+    const receiptVat = Number(uiVat) || 0;
+    const receiptTotal = Number(uiTotal) || 0;
+    const receiptCash = Number(cash) || 0;
+    const receiptChange = Number(change) || 0;
+
+    const now = new Date();
+    const dateStr = now.toLocaleDateString();
+    const timeStr = now.toLocaleTimeString();
+
+    const cashierName = String(window.currentUserName || '');
+
+    let html = `<div class="receipt-header"><h5>${receiptNumber || 'INVOICE'}</h5><small>${dateStr} ${timeStr}</small></div><hr/>`;
+
+    html += `<div class="receipt-field"><strong>Customer:</strong><span>${escapeHtml(customerName || 'Walk-in')}</span></div>`;
+    html += `<div class="receipt-field"><strong>Cashier:</strong><span>${escapeHtml(cashierName)}</span></div>`;
+    html += `<hr/>`;
+
+    html += `<div class="receipt-items-header"><span style="flex:1;">Item</span><span style="width:70px;text-align:right;">Qty</span><span style="width:90px;text-align:right;">Total</span></div>`;
+    cart.forEach(i => {
+      const lineTotal = ((Number(i.price) || 0) * (i.qty || 0)).toFixed(2);
+      html += `<div class="receipt-item"><span style="flex:1;">${escapeHtml(i.name)}</span><span style="width:70px;text-align:right;">${i.qty} ×</span><span style="width:90px;text-align:right;">₱${lineTotal}</span></div>`;
+    });
+
+    html += `<hr/>`;
+    html += `<div class="receipt-totals">`;
+    // VATable Sales: use uiVatable if it's available/valid; otherwise derive from preDiscountTotal - vat
+    const vatableDisplay = (Number(uiVatable) || 0) || round2(receiptSubtotal - receiptVat);
+    html += `<div><span>VATable Sales:</span><span>₱${(vatableDisplay).toFixed(2)}</span></div>`;
+    html += `<div><span>VAT:</span><span>₱${(receiptVat).toFixed(2)}</span></div>`;
+    html += `<div><span>Discount:</span><span>(₱${(receiptDiscount).toFixed(2)})</span></div>`;
+    html += `<div style="font-weight:700"><span>TOTAL:</span><span>₱${(receiptTotal).toFixed(2)}</span></div>`;
+    html += `<hr/>`;
+    html += `<div><span>CASH:</span><span>₱${(receiptCash).toFixed(2)}</span></div>`;
+    html += `<div><span>CHANGE:</span><span>₱${(receiptChange).toFixed(2)}</span></div>`;
+    html += `</div><hr/>`;
+
+    html += `<div class="receipt-field"><strong>Signature:</strong><span></span></div>`;
+    html += `<p style="text-align:center; font-size:13px; margin-top:8px;">Thank you for your purchase!</p>`;
+
+    return html;
+  }
+
+  // Small escaping helper for receipt text
+  function escapeHtml(s) {
+    if (!s) return '';
+    return s.replace(/[&<>"'`=\/]/g, function (c) {
+      return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','/':'&#x2F;','=':'&#x3D;','`':'&#x60'}[c];
+    });
+  }
+
+  // Print receipt listener
+  document.getElementById('printReceiptBtn').addEventListener('click', function() {
+    const receiptHtml = document.getElementById('receiptTemplate').innerHTML;
+    const printWindow = window.open('', '', 'height=700,width=480');
+    printWindow.document.write('<html><head><title>Print Receipt</title>');
+    printWindow.document.write('<style>');
+    printWindow.document.write(`
+      body { font-family: 'Courier New', Courier, monospace; margin:16px; color:#000; }
+      hr { border-top: 1px dashed #000; margin:10px 0; }
+      .receipt-header { text-align:center; margin-bottom:8px; }
+      .receipt-header h5 { margin:0; font-weight:700; text-transform:uppercase; }
+      .receipt-field { display:flex; justify-content:space-between; margin-bottom:6px; border-bottom:1px dotted #ddd; padding-bottom:4px; }
+      .receipt-items-header { display:flex; justify-content:space-between; font-weight:700; border-bottom:1px solid #ddd; padding-bottom:6px; margin-top:8px; }
+      .receipt-item { display:flex; justify-content:space-between; margin-top:6px; }
+      .receipt-totals { margin-top:10px; }
+      .receipt-totals div { display:flex; justify-content:space-between; margin-bottom:4px; }
+    `);
+    printWindow.document.write('</style></head><body>');
+    printWindow.document.write(receiptHtml);
+    printWindow.document.write('</body></html>');
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); printWindow.close(); }, 250);
+  });
+  
+  scPwdButton.addEventListener('click', () => {
+    isScPwdDiscount = !isScPwdDiscount;
+    if (isScPwdDiscount) {
+        discountValueEl.value = '0';
+    }
+    renderCart();
+  });
+
+  discountTypeEl.addEventListener('change', renderCart);
+  discountValueEl.addEventListener('input', renderCart);
+  saleIsVatableEl.addEventListener('change', renderCart);
+
+  renderCart();
+
+});
+</script>
+{% endblock %}

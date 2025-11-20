@@ -1,0 +1,250 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container">
+    <div class="card shadow-lg">
+        <div class="card-body p-5">
+            <!-- Header -->
+            <div class="text-center mb-4">
+                <h2 class="mb-1">CONSIGNMENT SETTLEMENT RECEIPT</h2>
+                <p class="text-muted mb-0">{{ consignment.receipt_number }}</p>
+                <small class="text-muted">Settlement Date: {{ remittance.date_paid.strftime('%B %d, %Y %I:%M %p') }}</small>
+            </div>
+
+            <hr>
+
+            <!-- Parties Information -->
+            <div class="row mb-4">
+                <div class="col-md-6">
+                    <h6 class="text-uppercase text-muted mb-3">Consignor (Supplier)</h6>
+                    <p class="mb-1"><strong>{{ consignment.supplier.name }}</strong></p>
+                    {% if consignment.supplier.tin %}
+                    <p class="mb-1">TIN: {{ consignment.supplier.tin }}</p>
+                    {% endif %}
+                    {% if consignment.supplier.address %}
+                    <p class="mb-0">{{ consignment.supplier.address }}</p>
+                    {% endif %}
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <h6 class="text-uppercase text-muted mb-3">Consignee (Your Store)</h6>
+                    {% set company = get_company_profile() %}
+                    <p class="mb-1"><strong>{{ company.name }}</strong></p>
+                    <p class="mb-1">TIN: {{ company.tin }}</p>
+                    <p class="mb-0">{{ company.address }}</p>
+                </div>
+            </div>
+
+            <hr>
+
+            <!-- Consignment Summary -->
+            <div class="mb-4">
+                <h5 class="mb-3">Consignment Summary</h5>
+                <div class="row">
+                    <div class="col-md-6">
+                        <table class="table table-sm table-borderless">
+                            <tr>
+                                <td><strong>Received Date:</strong></td>
+                                <td>{{ consignment.date_received.strftime('%Y-%m-%d') }}</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Commission Rate:</strong></td>
+                                <td>{{ consignment.commission_rate }}%</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Settled By:</strong></td>
+                                <td>{{ remittance.created_by.username if remittance.created_by else 'N/A' }}</td>
+                            </tr>
+                        </table>
+                    </div>
+                    <div class="col-md-6">
+                        <table class="table table-sm table-borderless">
+                            <tr>
+                                <td><strong>Total Items Received:</strong></td>
+                                <td>{{ total_received }} units</td>
+                            </tr>
+                            <tr>
+                                <td><strong>Total Retail Value:</strong></td>
+                                <td>₱{{ "%.2f"|format(consignment.total_value) }}</td>
+                            </tr>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Items Breakdown -->
+            <div class="mb-4">
+                <h5 class="mb-3">Items Breakdown</h5>
+                <div class="table-responsive">
+                    <table class="table table-bordered">
+                        <thead class="table-light">
+                            <tr>
+                                <th>SKU</th>
+                                <th>Product Name</th>
+                                <th class="text-center">Received</th>
+                                <th class="text-center">Sold</th>
+                                <th class="text-center">Returned</th>
+                                <th class="text-center">Damaged</th>
+                                <th class="text-end">Unit Price</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                            <tr>
+                                <td><code>{{ item.sku }}</code></td>
+                                <td>{{ item.product_name }}</td>
+                                <td class="text-center">{{ item.quantity_received }}</td>
+                                <td class="text-center">
+                                    {% if item.quantity_sold > 0 %}
+                                    <span class="badge bg-success">{{ item.quantity_sold }}</span>
+                                    {% else %}
+                                    {{ item.quantity_sold }}
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    {% if item.quantity_returned > 0 %}
+                                    <span class="badge bg-info">{{ item.quantity_returned }}</span>
+                                    {% else %}
+                                    {{ item.quantity_returned }}
+                                    {% endif %}
+                                </td>
+                                <td class="text-center">
+                                    {% if item.quantity_damaged > 0 %}
+                                    <span class="badge bg-danger">{{ item.quantity_damaged }}</span>
+                                    {% else %}
+                                    {{ item.quantity_damaged }}
+                                    {% endif %}
+                                </td>
+                                <td class="text-end">₱{{ "%.2f"|format(item.retail_price) }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                        <tfoot class="table-light">
+                            <tr>
+                                <td colspan="2" class="text-end"><strong>TOTALS:</strong></td>
+                                <td class="text-center"><strong>{{ total_received }}</strong></td>
+                                <td class="text-center"><strong>{{ total_sold }}</strong></td>
+                                <td class="text-center"><strong>{{ total_returned }}</strong></td>
+                                <td class="text-center"><strong>{{ total_damaged }}</strong></td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Financial Settlement -->
+            <div class="mb-4">
+                <h5 class="mb-3">Financial Settlement</h5>
+                <div class="row">
+                    <div class="col-md-6 offset-md-6">
+                        <table class="table table-sm">
+                            <tr>
+                                <td>Total Sold ({{ total_sold }} units):</td>
+                                <td class="text-end">₱{{ "%.2f"|format(total_sold_value) }}</td>
+                            </tr>
+                            <tr class="table-success">
+                                <td>Your Commission ({{ consignment.commission_rate }}%):</td>
+                                <td class="text-end">-₱{{ "%.2f"|format(commission_earned) }}</td>
+                            </tr>
+                            <tr class="table-warning">
+                                <td><strong>Amount Due to Supplier:</strong></td>
+                                <td class="text-end"><strong>₱{{ "%.2f"|format(amount_due_total) }}</strong></td>
+                            </tr>
+                            <tr>
+                                <td colspan="2"><hr></td>
+                            </tr>
+                            <tr>
+                                <td><strong>Total Paid:</strong></td>
+                                <td class="text-end"><strong>₱{{ "%.2f"|format(total_paid) }}</strong></td>
+                            </tr>
+                            {% if total_paid < amount_due_total %}
+                            <tr class="table-danger">
+                                <td><strong>Balance Remaining:</strong></td>
+                                <td class="text-end"><strong>₱{{ "%.2f"|format(amount_due_total - total_paid) }}</strong></td>
+                            </tr>
+                            {% else %}
+                            <tr class="table-success">
+                                <td colspan="2" class="text-center">
+                                    <i class="bi bi-check-circle-fill me-2"></i><strong>FULLY PAID</strong>
+                                </td>
+                            </tr>
+                            {% endif %}
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Payment Details -->
+            <div class="mb-4">
+                <h5 class="mb-3">Payment Details</h5>
+                <table class="table table-bordered">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Date</th>
+                            <th>Amount</th>
+                            <th>Method</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for r in all_remittances %}
+                        <tr {% if r.id == remittance.id %}class="table-info"{% endif %}>
+                            <td>{{ r.date_paid.strftime('%Y-%m-%d %H:%M') }}</td>
+                            <td>₱{{ "%.2f"|format(r.amount_paid) }}</td>
+                            <td>{{ r.payment_method or 'N/A' }}</td>
+                            <td>{{ r.notes or '-' }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Signatures -->
+            <div class="row mt-5 pt-4">
+                <div class="col-md-6">
+                    <div class="border-top pt-2 text-center">
+                        <p class="mb-0"><strong>Prepared By:</strong></p>
+                        <p class="mb-0">{{ remittance.created_by.username if remittance.created_by else 'N/A' }}</p>
+                        <small class="text-muted">{{ remittance.date_paid.strftime('%Y-%m-%d %H:%M') }}</small>
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <div class="border-top pt-2 text-center">
+                        <p class="mb-0"><strong>Received By (Supplier):</strong></p>
+                        <p class="mb-4">&nbsp;</p>
+                        <small class="text-muted">Signature over Printed Name</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Footer -->
+            <div class="text-center mt-4 pt-4 border-top">
+                <p class="text-muted mb-0">
+                    <small>This is a computer-generated receipt. Generated on {{ datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC') }}</small>
+                </p>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="text-center mt-4 no-print">
+                <button onclick="window.print()" class="btn btn-primary me-2">
+                    <i class="bi bi-printer me-1"></i> Print Receipt
+                </button>
+                <a href="{{ url_for('consignment.view_consignment', consignment_id=consignment.id) }}" class="btn btn-secondary">
+                    <i class="bi bi-arrow-left me-1"></i> Back to Consignment
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<style>
+@media print {
+    .no-print {
+        display: none !important;
+    }
+    .card {
+        box-shadow: none !important;
+        border: none !important;
+    }
+}
+</style>
+{% endblock %}

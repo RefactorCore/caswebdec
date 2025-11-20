@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2 class="fw-bold text-primary mb-0">📈 Income Statement</h2>
+    <a href="{{ url_for('reports.export_income_statement', start_date=start_date, end_date=end_date) }}" class="btn btn-success">
+        ⬇ Export CSV
+    </a>
+</div>
+
+<div class="card shadow-sm mb-3">
+  <div class="card-body">
+    <form method="GET" action="" class="row g-3 align-items-end">
+      <div class="col-md-4">
+        <label for="start_date" class="form-label">Start Date</label>
+        <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
+      </div>
+      <div class="col-md-4">
+        <label for="end_date" class="form-label">End Date</label>
+        <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+      </div>
+      <div class="col-md-2">
+        <button type="submit" class="btn btn-primary w-100">Filter</button>
+      </div>
+      <div class="col-md-2">
+        <a href="{{ request.path }}" class="btn btn-outline-secondary w-100">Clear</a>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body">
+        <table class="table report-table mb-0">
+          <thead class="table-primary">
+            <tr>
+              <th>Description</th>
+              <th class="text-end">Amount</th>
+            </tr>
+          </thead>
+          <tbody>
+
+            <!-- Revenue section -->
+            <tr class="report-section-header">
+              <td>Revenue</td>
+              <td class="report-amount"></td>
+            </tr>
+
+            {# Attempt to show a "Sales Revenue" line first if present, otherwise render all revenue lines #}
+            {% if 'Sales Revenue' in revenues %}
+            <tr>
+              <td class="report-indent">Sales Revenue:</td>
+              <td class="report-amount">{{ revenues['Sales Revenue'] | money }}</td>
+            </tr>
+            {% endif %}
+
+            {# Render any other revenue lines (excluding Sales Revenue if already shown) #}
+            {% for name, balance in revenues.items() %}
+              {% if name != 'Sales Revenue' %}
+              <tr>
+                <td class="report-indent">{{ name }}</td>
+                <td class="report-amount">{{ balance | money }}</td>
+              </tr>
+              {% endif %}
+            {% endfor %}
+
+            <!-- Total Revenue -->
+            <tr class="report-rule-strong">
+              <td class="fw-bold">Total Revenue:</td>
+              <td class="report-amount fw-bold">{{ total_revenue | money }}</td>
+            </tr>
+
+            <tr class="tr-spacer"><td colspan="2"></td></tr>
+
+            <!-- COGS and Gross Profit -->
+            {% if cogs is defined %}
+            <tr>
+              <td>COGS:</td>
+              <td class="report-amount amount-negative">({{ cogs | money }})</td>
+            </tr>
+
+            {% set gross_profit = total_revenue - cogs %}
+            <tr class="report-gross report-rule">
+              <td class="report-indent fw-semibold">Gross Profit:</td>
+              <td class="report-amount fw-semibold">{{ gross_profit | money }}</td>
+            </tr>
+            {% endif %}
+
+            <tr class="tr-spacer"><td colspan="2"></td></tr>
+
+            <!-- Expenses section -->
+            <tr class="report-section-header">
+              <td>Expenses</td>
+              <td class="report-amount"></td>
+            </tr>
+
+            {% for name, balance in expenses.items() %}
+            <tr>
+              <td class="report-indent">{{ name }}</td>
+              <td class="report-amount amount-negative">({{ balance | money }})</td>
+            </tr>
+            {% endfor %}
+
+            <!-- Total Expenses -->
+            <tr class="report-rule-strong">
+              <td class="fw-bold">Total Expenses:</td>
+              <td class="report-amount fw-bold">({{ total_expense | money }})</td>
+            </tr>
+
+            <tr class="tr-spacer"><td colspan="2"></td></tr>
+
+            <!-- Net Income -->
+            {% if cogs is defined %}
+              {% set net_income_calc = (total_revenue - cogs) - total_expense %}
+              <tr class="report-net">
+                <td>Net Income:</td>
+                <td class="report-amount">{{ net_income_calc | money }}</td>
+              </tr>
+            {% else %}
+              <tr class="report-net">
+                <td>Net Income:</td>
+                <td class="report-amount">{{ net_income | money }}</td>
+              </tr>
+            {% endif %}
+
+          </tbody>
+        </table>
+    </div>
+</div>
+
+</div>
+{% endblock %}

@@ -1,0 +1,716 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container-fluid my-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-receipt me-2"></i>Billing Invoices (Credit Sales / Utang)</h2>
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#newBillingInvoiceModal">
+            <i class="bi bi-plus-circle me-1"></i> New Billing Invoice
+        </button>
+    </div>
+
+    <!-- Invoices List -->
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Invoice #</th>
+                        <th>Date</th>
+                        <th>Due Date</th>
+                        <th>Customer</th>
+                        <th>Type</th>
+                        <th>Total</th>
+                        <th>VAT</th>
+                        <th>Paid</th>
+                        <th>Balance</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in invoices %}
+                    {% set balance = inv.total - inv.paid %}
+                    {% set days_overdue = inv.days_overdue() if inv.due_date else 0 %}
+                    <!-- ✅ UPDATED: Added voided styling -->
+                    <tr class="{{ 'table-danger' if days_overdue > 30 else ('table-warning' if days_overdue > 0 else '') }} {{ 'table-secondary text-decoration-line-through' if inv.voided_at else '' }}">
+                        <td><strong>{{ inv.invoice_number or 'INV-' + inv.id|string }}</strong></td>
+                        <td>{{ inv.date.strftime('%Y-%m-%d') }}</td>
+                        <td>
+                            {% if inv.due_date %}
+                                {{ inv.due_date.strftime('%Y-%m-%d') }}
+                                {% if days_overdue > 0 %}
+                                    <br><small class="text-danger"><strong>{{ days_overdue }} days overdue!</strong></small>
+                                {% elif inv.status != 'Paid' %}
+                                    {% set days_until_due = ((inv.due_date - inv.date).days) - days_overdue %}
+                                    {% if days_until_due <= 7 and days_until_due > 0 %}
+                                        <br><small class="text-warning">Due in {{ days_until_due }} days</small>
+                                    {% endif %}
+                                {% endif %}
+                            {% else %}
+                                <span class="text-muted">Not set</span>
+                            {% endif %}
+                        </td>
+                        <td>{{ inv.customer.name if inv.customer else 'N/A' }}</td>
+                        <td>
+                            <span class="badge bg-{{ 'info' if inv.is_vatable else 'secondary' }}">
+                                {{ 'VAT' if inv.is_vatable else 'Non-VAT' }}
+                            </span>
+                        </td>
+                        <td>{{ inv.total | money }}</td>
+                        <td>{{ inv.vat | money }}</td>
+                        <td>{{ inv.paid | money }}</td>
+                        <td>{{ balance | money }}</td>
+                        <!-- ✅ UPDATED: Added voided status badge -->
+                        <td>
+                            {% if inv.voided_at %}
+                                <span class="badge bg-dark">VOIDED</span>
+                            {% else %}
+                                <span class="badge bg-{{ 'success' if inv.status == 'Paid' else ('warning text-dark' if inv.status == 'Partially Paid' else 'danger') }}">
+                                    {{ inv.status }}
+                                </span>
+                            {% endif %}
+                        </td>
+                        <!-- ✅ UPDATED: Added void button -->
+                        <td>
+                            <button class="btn btn-sm btn-outline-info" data-bs-toggle="collapse" data-bs-target="#invoice-{{ inv.id }}">
+                                <i class="bi bi-eye"></i> View
+                            </button>
+                            
+                            {% if not inv.voided_at %}
+                                {% if inv.status != 'Paid' %}
+                                <button class="btn btn-sm btn-primary"
+                                        data-bs-toggle="modal"
+                                        data-bs-target="#recordPaymentModal"
+                                        onclick="setPaymentDetails('AR', {{ inv.id }}, {{ balance }}, {{ inv.customer.wht_rate_percent if inv.customer else 0 }}, {{ inv.total - inv.vat }})">
+                                    <i class="bi bi-cash"></i> Collect
+                                </button>
+                                {% endif %}
+                                
+                                <button class="btn btn-sm btn-outline-danger" 
+                                        data-bs-toggle="modal" 
+                                        data-bs-target="#voidInvoiceModal"
+                                        onclick="setVoidInvoiceTarget('{{ url_for('void.void_ar_invoice', invoice_id=inv.id) }}', '{{ inv.invoice_number or 'AR-' + inv.id|string }}', {{ inv.paid }})">
+                                    <i class="bi bi-x-circle"></i> Void
+                                </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    <tr>
+                        <td colspan="11" class="p-0">
+                            <div class="collapse" id="invoice-{{ inv.id }}">
+                                <div class="card card-body bg-light m-2">
+                                    <!-- ✅ VOID INFO (keep existing) -->
+                                    {% if inv.voided_at %}
+                                    <div class="alert alert-danger mb-3">
+                                        <h6><i class="bi bi-x-circle-fill me-2"></i>Invoice Voided</h6>
+                                        <p class="mb-1"><strong>Voided At:</strong> {{ inv.voided_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                                        <p class="mb-1"><strong>Voided By:</strong> {{ inv.voided_by_user.username if inv.voided_by_user else 'System' }}</p>
+                                        <p class="mb-0"><strong>Reason:</strong> {{ inv.void_reason }}</p>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <!-- ✅ NEW: PAYMENTS SECTION -->
+                                    {% if inv.paid > 0 %}
+                                    <div class="mb-3">
+                                        <h6><strong>Payments Received:</strong></h6>
+                                        <table class="table table-sm table-bordered">
+                                            <thead>
+                                                <tr>
+                                                    <th>Date</th>
+                                                    <th>Amount</th>
+                                                    <th>WHT</th>
+                                                    <th>Method</th>
+                                                    <th>Status</th>
+                                                    <th>Actions</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                {% set payments = [] %}
+                                                {% for p in Payment.query.filter_by(ref_type='AR', ref_id=inv.id).all() %}
+                                                    {% set _ = payments.append(p) %}
+                                                {% endfor %}
+                                                
+                                                {% for payment in payments %}
+                                                <tr class="{{ 'text-decoration-line-through table-secondary' if payment.voided_at else '' }}">
+                                                    <td>{{ payment.date.strftime('%Y-%m-%d %H:%M') }}</td>
+                                                    <td>₱{{ "%.2f"|format(payment.amount) }}</td>
+                                                    <td>₱{{ "%.2f"|format(payment.wht_amount or 0) }}</td>
+                                                    <td>{{ payment.method }}</td>
+                                                    <td>
+                                                        {% if payment.voided_at %}
+                                                            <span class="badge bg-dark">VOIDED</span>
+                                                        {% else %}
+                                                            <span class="badge bg-success">Recorded</span>
+                                                        {% endif %}
+                                                    </td>
+                                                    <td>
+                                                        {% if not payment.voided_at %}
+                                                        <button class="btn btn-sm btn-outline-danger"
+                                                                data-bs-toggle="modal"
+                                                                data-bs-target="#voidPaymentModal"
+                                                                onclick="setVoidPaymentTarget('{{ url_for('void.void_payment', payment_id=payment.id) }}', 'Payment #{{ payment.id }}')">
+                                                            <i class="bi bi-x-circle"></i> Void
+                                                        </button>
+                                                        {% else %}
+                                                            <small class="text-muted">Voided by {{ payment.voided_by_user.username if payment.voided_by_user else 'System' }}</small>
+                                                        {% endif %}
+                                                    </td>
+                                                </tr>
+                                                {% else %}
+                                                <tr>
+                                                    <td colspan="6" class="text-center text-muted">No payments recorded</td>
+                                                </tr>
+                                                {% endfor %}
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                    {% endif %}
+                                    
+                                    <!-- ✅ INVOICE ITEMS (keep existing) -->
+                                    <h6><strong>Invoice Items:</strong></h6>
+                                    {% if inv.description %}
+                                    <p class="mb-2"><em>{{ inv.description }}</em></p>
+                                    {% endif %}
+                                    <table class="table table-sm table-bordered">
+                                        <thead>
+                                            <tr>
+                                                <th>Product</th>
+                                                <th>SKU</th>
+                                                <th>Qty</th>
+                                                <th>Unit Price</th>
+                                                <th>Type</th>
+                                                <th>Line Total</th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            {% for item in inv.items %}
+                                            <tr>
+                                                <td>{{ item.product_name }}</td>
+                                                <td>{{ item.sku }}</td>
+                                                <td>{{ item.qty }}</td>
+                                                <td>{{ item.unit_price | money }}</td>
+                                                <td>
+                                                    <span class="badge bg-{{ 'info' if item.is_vatable else 'secondary' }}">
+                                                        {{ 'VAT' if item.is_vatable else 'Non-VAT' }}
+                                                    </span>
+                                                </td>
+                                                <td>{{ item.line_total | money }}</td>
+                                            </tr>
+                                            {% endfor %}
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="11" class="text-center">No billing invoices found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- ✅ NEW: Void Invoice Modal -->
+<div class="modal fade" id="voidInvoiceModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="voidInvoiceForm" method="POST">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>Void Invoice
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <strong>Warning:</strong> This will reverse inventory and all accounting entries.
+                    </div>
+                    
+                    <!-- Payment Warning -->
+                    <div id="voidPaymentWarning" class="alert alert-danger d-none">
+                        <strong>Error:</strong> Cannot void invoice with payments. Please void the payments first.
+                    </div>
+                    
+                    <p>Invoice: <strong id="voidInvoiceTargetName"></strong></p>
+                    
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Void Reason *</strong></label>
+                        <textarea name="void_reason" class="form-control" rows="3" placeholder="Enter reason for voiding this invoice..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger" id="voidInvoiceSubmitBtn">
+                        <i class="bi bi-x-circle me-1"></i> Void Invoice
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- New Billing Invoice Modal -->
+<div class="modal fade" id="newBillingInvoiceModal" tabindex="-1">
+    <div class="modal-dialog modal-xl">
+        <div class="modal-content">
+            <form action="{{ url_for('ar_ap.billing_invoices') }}" method="POST" id="billingInvoiceForm">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title"><i class="bi bi-receipt me-2"></i>Create Billing Invoice</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row mb-3">
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Customer *</strong></label>
+                            <select name="customer_id" id="customerSelect" class="form-select" onchange="updatePaymentTerms()" required>
+                                <option value="">Select Customer...</option>
+                                {% for cust in customers %}
+                                <option value="{{ cust.id }}" data-terms="{{ cust.payment_terms_days if cust.payment_terms_days else 30 }}">
+                                    {{ cust.name }}
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Due Date *</strong></label>
+                            <input type="date" name="due_date" id="dueDate" class="form-control" required>
+                            <small class="text-muted">Payment terms: <span id="paymentTermsDisplay">30</span> days</small>
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label"><strong>Description/Notes</strong></label>
+                            <input type="text" name="description" class="form-control" placeholder="e.g., Monthly supplies order">
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Default Tax Type</strong></label>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="is_vatable" value="true" id="defaultVatable" checked>
+                            <label class="form-check-label" for="defaultVatable">
+                                VATable (12% VAT included in price)
+                            </label>
+                        </div>
+                        <small class="text-muted">This sets the default for new line items. You can change it per item below.</small>
+                    </div>
+
+                    <hr>
+
+                    <!-- Line Items -->
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6><strong>Invoice Items</strong></h6>
+                        <button type="button" class="btn btn-sm btn-success" onclick="addLineItem()">
+                            <i class="bi bi-plus-circle"></i> Add Product
+                        </button>
+                    </div>
+
+                    <div id="lineItemsContainer">
+                        <!-- Line items will be added here dynamically -->
+                    </div>
+
+                    <hr>
+
+                    <!-- Totals -->
+                    <div class="row">
+                        <div class="col-md-8"></div>
+                        <div class="col-md-4">
+                            <table class="table table-sm">
+                                <tr>
+                                    <td><strong>Subtotal:</strong></td>
+                                    <td class="text-end" id="displaySubtotal">₱0.00</td>
+                                </tr>
+                                <tr>
+                                    <td><strong>VAT (12%):</strong></td>
+                                    <td class="text-end" id="displayVAT">₱0.00</td>
+                                </tr>
+                                <tr class="table-success">
+                                    <td><strong>Total:</strong></td>
+                                    <td class="text-end"><strong id="displayTotal">₱0.00</strong></td>
+                                </tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-save"></i> Create Invoice
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Replace your existing payment modal <div> with this full block (no Jinja 'inv' usage) -->
+<div class="modal fade" id="recordPaymentModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form action="{{ url_for('ar_ap.record_payment') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Record Payment</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="ref_type" id="paymentRefType">
+                    <input type="hidden" name="ref_id" id="paymentRefId">
+                    <input type="hidden" id="paymentFullBalance" value="0">
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Amount Paid (Cash/Bank)</strong></label>
+                        <input type="number" step="0.01" name="amount" id="paymentAmount" class="form-control" oninput="calculateWHT('amount')" required>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Withholding Tax (Form 2307)</strong></label>
+                        <input type="number" step="0.01" name="wht_amount" id="paymentWHT" class="form-control" oninput="calculateWHT('wht')" value="0" required>
+                        <small class="text-muted">Enter WHT amount manually if applicable.</small>
+                    </div>
+
+                    <!-- Removed auto-calculate button per request; WHT is manual only -->
+
+                    <div class="mb-3">
+                        <label class="form-label">Payment Method</label>
+                        <select name="method" class="form-select" required>
+                            <option value="Cash">Cash</option>
+                            <option value="Bank">Bank Transfer/Check</option>
+                        </select>
+                    </div>
+
+                    <div class="alert alert-info">
+                        <div>Full Balance Due: <strong id="maxBalance">₱0.00</strong></div>
+                        <hr class="my-2">
+                        <div class="fw-bold">Total Credited: <strong id="totalCredited" class="fs-5">₱0.00</strong></div>
+                        <small id="whtNotice" class="text-muted d-none">WHT rate applied.</small>
+                    </div>
+
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary">Record Payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+
+<!-- ✅ NEW: Void Payment Modal -->
+<div class="modal fade" id="voidPaymentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="voidPaymentForm" method="POST">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>Void Payment
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <strong>Warning:</strong> This will reverse the payment and restore the invoice balance.
+                    </div>
+                    <p>Payment: <strong id="voidPaymentTargetName"></strong></p>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Void Reason *</strong></label>
+                        <textarea name="void_reason" class="form-control" rows="3" placeholder="Enter reason for voiding this payment..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-circle me-1"></i> Void Payment
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+let lineItemCounter = 0;
+const products = {{ products | tojson }};
+
+// ✅ NEW: Void invoice function with payment check
+function setVoidInvoiceTarget(actionUrl, targetName, paidAmount) {
+    document.getElementById('voidInvoiceForm').action = actionUrl;
+    document.getElementById('voidInvoiceTargetName').textContent = targetName;
+    
+    // Check if invoice has payments
+    const warningDiv = document.getElementById('voidPaymentWarning');
+    const submitBtn = document.getElementById('voidInvoiceSubmitBtn');
+    
+    if (paidAmount > 0) {
+        warningDiv.classList.remove('d-none');
+        submitBtn.disabled = true;
+    } else {
+        warningDiv.classList.add('d-none');
+        submitBtn.disabled = false;
+    }
+}
+
+
+// ✅ NEW: Void payment function
+function setVoidPaymentTarget(actionUrl, targetName) {
+    document.getElementById('voidPaymentForm').action = actionUrl;
+    document.getElementById('voidPaymentTargetName').textContent = targetName;
+}
+
+function addLineItem() {
+    lineItemCounter++;
+    const container = document.getElementById('lineItemsContainer');
+    const defaultVatable = document.getElementById('defaultVatable').checked;
+    
+    // Build product options from the products array
+    let productOptions = '<option value="">Select Product...</option>';
+    products.forEach(product => {
+        productOptions += `<option value="${product.id}" 
+            data-price="${product.sale_price}" 
+            data-name="${product.name}"
+            data-sku="${product.sku}"
+            data-stock="${product.quantity}">
+            ${product.name} (${product.sku}) - Stock: ${product.quantity}
+        </option>`;
+    });
+    
+    const lineItemHtml = `
+        <div class="card mb-2 line-item" id="lineItem${lineItemCounter}">
+            <div class="card-body">
+                <div class="row g-2 align-items-center">
+                    <div class="col-md-4">
+                        <label class="form-label">Product</label>
+                        <select name="product_id[]" class="form-select product-select" onchange="updateLineItem(${lineItemCounter})" required>
+                            ${productOptions}
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Quantity</label>
+                        <input type="number" name="quantity[]" class="form-control qty-input" min="1" value="1" onchange="calculateTotals()" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Unit Price</label>
+                        <input type="number" step="0.01" name="unit_price[]" class="form-control price-input" min="0.01" onchange="calculateTotals()" required>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Type</label>
+                        <select name="line_vatable[]" class="form-select vatable-select" onchange="calculateTotals()">
+                            <option value="true" ${defaultVatable ? 'selected' : ''}>VAT</option>
+                            <option value="false" ${!defaultVatable ? 'selected' : ''}>Non-VAT</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label">Line Total</label>
+                        <input type="text" class="form-control line-total" readonly value="₱0.00">
+                    </div>
+                    <div class="col-auto">
+                        <label class="form-label">&nbsp;</label><br>
+                        <button type="button" class="btn btn-sm btn-danger" onclick="removeLineItem(${lineItemCounter})">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.insertAdjacentHTML('beforeend', lineItemHtml);
+}
+
+function removeLineItem(id) {
+    document.getElementById('lineItem' + id).remove();
+    calculateTotals();
+}
+
+function updateLineItem(id) {
+    const lineItem = document.getElementById('lineItem' + id);
+    const select = lineItem.querySelector('.product-select');
+    const selectedOption = select.options[select.selectedIndex];
+    
+    if (selectedOption.value) {
+        const price = parseFloat(selectedOption.dataset.price);
+        lineItem.querySelector('.price-input').value = price.toFixed(2);
+        calculateTotals();
+    }
+}
+
+function calculateTotals() {
+    const lineItems = document.querySelectorAll('.line-item');
+    let subtotal = 0;  // Net subtotal
+    let totalVAT = 0;
+    let grandTotal = 0;
+    
+    lineItems.forEach(item => {
+        const qty = parseFloat(item.querySelector('.qty-input').value) || 0;
+        const price = parseFloat(item.querySelector('.price-input').value) || 0;
+        const isVatable = item.querySelector('.vatable-select').value === 'true';
+        
+        let lineTotal = qty * price;
+        let lineVAT = 0;
+        
+        if (isVatable && lineTotal > 0) {
+            const netPrice = lineTotal / 1.12;
+            lineVAT = lineTotal - netPrice;
+            subtotal += netPrice;  // Add net to subtotal
+        } else {
+            subtotal += lineTotal;  // Non-vatable: add full to subtotal
+        }
+        
+        totalVAT += lineVAT;
+        grandTotal += lineTotal;  // Full amount
+        
+        item.querySelector('.line-total').value = '₱' + lineTotal.toFixed(2);
+    });
+    
+    document.getElementById('displaySubtotal').textContent = '₱' + subtotal.toFixed(2);
+    document.getElementById('displayVAT').textContent = '₱' + totalVAT.toFixed(2);
+    document.getElementById('displayTotal').textContent = '₱' + grandTotal.toFixed(2);
+}
+
+// ✅ REVISED: setPaymentDetails function
+function setPaymentDetails(refType, refId, balance, wht_rate, vatable_base) {
+    document.getElementById('paymentRefType').value = refType;
+    document.getElementById('paymentRefId').value = refId;
+
+    const fullBalance = parseFloat(balance) || 0;
+    const rate = parseFloat(wht_rate) || 0;
+    const vatable = parseFloat(vatable_base) || 0;
+
+    // store for Calculate WHT button (modal is shared)
+    window.currentWHTRate = rate;
+    window.currentVatableBase = vatable;
+
+    // keep a hidden copy of the full balance for calculations
+    document.getElementById('paymentFullBalance').value = fullBalance;
+
+    // do not auto-fill amounts — leave for user input
+    document.getElementById('paymentAmount').value = '';
+    document.getElementById('paymentWHT').value = '0';
+
+    // update UI displays
+    document.getElementById('maxBalance').innerText = '₱' + fullBalance.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const notice = document.getElementById('whtNotice');
+
+    // If the customer has a WHT rate, show informative notice but do not auto-set fields
+    if (rate > 0) {
+        // compute what WHT would be on the vatable base for info
+        const infoWHT = +(vatable * (rate / 100)).toFixed(2);
+        if (infoWHT <= fullBalance) {
+            notice.classList.remove('d-none');
+            notice.textContent = `Customer has ${rate}% WHT. Click "Calculate WHT" to apply on ₱${vatable.toFixed(2)}.`;
+        } else {
+            // WHT would exceed balance — still show info but warn
+            notice.classList.remove('d-none');
+            notice.textContent = `Customer has ${rate}% WHT but calculated WHT (₱${infoWHT.toFixed(2)}) exceeds balance. Adjust amount manually.`;
+        }
+    } else {
+        notice.classList.add('d-none');
+        notice.textContent = '';
+    }
+
+    // update totals display
+    calculateWHT();
+}
+
+// ✅ NEW: calculateWHT function
+function calculateWHT(changedField) {
+    const fullBalance = parseFloat(document.getElementById('paymentFullBalance').value) || 0;
+    const amountEl = document.getElementById('paymentAmount');
+    const whtEl = document.getElementById('paymentWHT');
+
+    // Read values that the user typed — do NOT auto-change the other field
+    const amount = parseFloat(amountEl.value) || 0;
+    const wht = parseFloat(whtEl.value) || 0;
+
+    // Compute totals and update UI only
+    const totalCredited = +(amount + wht);
+    const totalCreditedEl = document.getElementById('totalCredited');
+
+    totalCreditedEl.innerText = '₱' + totalCredited.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+    // Visual indicator whether total matches full balance
+    if (Math.abs(totalCredited - fullBalance) > 0.005) {
+        totalCreditedEl.classList.add('text-danger');
+        totalCreditedEl.classList.remove('text-success');
+    } else {
+        totalCreditedEl.classList.remove('text-danger');
+        totalCreditedEl.classList.add('text-success');
+    }
+
+    // Optional: show a small inline hint if totalCredited > fullBalance
+    const notice = document.getElementById('whtNotice');
+    if (totalCredited > fullBalance + 0.005) {
+        // warn user that credited total exceeds invoice balance
+        if (notice) {
+            notice.classList.remove('d-none');
+            notice.textContent = 'Total (Amount + WHT) exceeds invoice balance. Adjust values.';
+        }
+    } else {
+        // keep only informational WHT notice (if set by setPaymentDetails)
+        if (notice && notice.dataset.info) {
+            notice.classList.remove('d-none');
+            notice.textContent = notice.dataset.info;
+        } else if (notice) {
+            notice.classList.add('d-none');
+            notice.textContent = '';
+        }
+    }
+}
+
+
+
+// Auto-calculate due date based on customer payment terms
+function updatePaymentTerms() {
+    const customerSelect = document.getElementById('customerSelect');
+    const selectedOption = customerSelect.options[customerSelect.selectedIndex];
+    const paymentTerms = parseInt(selectedOption.dataset.terms) || 30;
+    
+    // Calculate due date
+    const today = new Date();
+    const dueDate = new Date(today.getTime() + (paymentTerms * 24 * 60 * 60 * 1000));
+    
+    // Format date as YYYY-MM-DD for input
+    const dueDateStr = dueDate.toISOString().split('T')[0];
+    document.getElementById('dueDate').value = dueDateStr;
+    
+    // Display payment terms
+    document.getElementById('paymentTermsDisplay').textContent = paymentTerms;
+}
+
+// Handle modal events
+document.getElementById('newBillingInvoiceModal').addEventListener('shown.bs.modal', function () {
+    const container = document.getElementById('lineItemsContainer');
+    
+    // Add first line item if container is empty
+    if (container.children.length === 0) {
+        addLineItem();
+    }
+    
+    // Set default due date (30 days from today) if not set
+    if (!document.getElementById('dueDate').value) {
+        const today = new Date();
+        const dueDate = new Date(today.getTime() + (30 * 24 * 60 * 60 * 1000));
+        document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
+    }
+});
+
+// Clear form on modal hide
+document.getElementById('newBillingInvoiceModal').addEventListener('hidden.bs.modal', function () {
+    document.getElementById('billingInvoiceForm').reset();
+    document.getElementById('lineItemsContainer').innerHTML = '';
+    lineItemCounter = 0;
+    calculateTotals();
+});
+
+</script>
+
+<style>
+.line-item {
+    border-left: 4px solid #198754;
+}
+</style>
+
+{% endblock %}

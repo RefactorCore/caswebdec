@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Receipt #{{ sale.document_number if sale.document_number else sale.id }}</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        /* CSS optimized for thermal receipt printing */
+        body {
+            font-family: 'Consolas', monospace; /* Monospace font looks cleaner on receipts */
+            font-size: 10pt;
+            max-width: 80mm; /* Standard receipt width */
+            margin: 0 auto;
+            padding: 10px;
+        }
+        .receipt-header, .receipt-footer {
+            text-align: center;
+            margin-bottom: 10px;
+        }
+        .item-row {
+            border-bottom: 1px dashed #ccc;
+            padding: 3px 0;
+            display: flex; /* Use flex for alignment */
+            justify-content: space-between;
+        }
+        .total-line {
+            font-weight: bold;
+            border-top: 1px solid #000;
+            padding-top: 5px;
+            margin-top: 5px;
+            text-align: right;
+        }
+        .text-small {
+            font-size: 8pt;
+        }
+        .no-print {
+            text-align: center;
+            padding: 10px;
+        }
+        @media print {
+            .no-print {
+                display: none;
+            }
+        }
+    </style>
+</head>
+<body onload="window.print()">
+    <div class="receipt-header">
+        <h5 class="mb-0">{{ company.name if company else 'Coretally POS' }}</h5>
+        <small class="text-small">{{ company.address if company else 'No Address Set' }}</small><br>
+        <small class="text-small">TIN: {{ company.tin if company else 'N/A' }}</small>
+    </div>
+
+    <div class="mb-2 text-small">
+        <div class="d-flex justify-content-between">
+            <span>{{ sale.document_type if sale.document_type else 'RECEIPT' }} NO:</span>
+            <span>**{{ sale.document_number if sale.document_number else sale.id }}**</span>
+        </div>
+        <div class="d-flex justify-content-between">
+            <span>Date:</span>
+            <span>{{ sale.created_at.strftime('%Y-%m-%d %I:%M %p') }}</span>
+        </div>
+        <div class="d-flex justify-content-between">
+            <span>Cashier:</span>
+            <span>{{ current_user.username if current_user.is_authenticated else 'System' }}</span>
+        </div>
+        <div class="d-flex justify-content-between">
+            <span>Customer:</span>
+            <span>{{ sale.customer_name or 'Walk-in' }}</span>
+        </div>
+    </div>
+
+    <div class="mb-2">
+        <div class="d-flex justify-content-between fw-bold">
+            <span style="width: 50%;">Item</span>
+            <span class="text-end" style="width: 15%;">Qty</span>
+            <span class="text-end" style="width: 35%;">Price</span>
+        </div>
+        {% for item in items %}
+        <div class="item-row">
+            <span style="width: 50%;">{{ item.product_name }}</span>
+            <span class="text-end" style="width: 15%;">{{ item.qty }}</span>
+            <span class="text-end" style="width: 35%;">{{ item.line_total | money }}</span>
+        </div>
+        {% endfor %}
+    </div>
+
+    <!-- Replace the totals block in your existing receipt.html (the section that prints Net Sales / VAT / Discount / TOTAL) with this clearer VAT-inclusive layout -->
+    <div class="text-end" style="width: 100%;">
+        <div class="total-line text-small">
+            <div class="d-flex justify-content-between">
+                <span>Subtotal (Gross):</span>
+                <span>{{ (sale.total + (sale.discount_value or 0)) | money }}</span>
+            </div>
+            <div class="d-flex justify-content-between">
+                <span>Discount:</span>
+                <span>{{ (sale.discount_value or 0) | money }}</span>
+            </div>
+            <div class="d-flex justify-content-between">
+                <span>VATable Sales (Net):</span>
+                <span>{{ (sale.total - sale.vat) | money }}</span>
+            </div>
+            <div class="d-flex justify-content-between">
+                <span>VAT ({{ (config.VAT_RATE * 100) | round(0) }}%):</span>
+                <span>{{ sale.vat | money }}</span>
+            </div>
+        </div>
+        <div class="total-line fw-bolder">
+            <div class="d-flex justify-content-between">
+                <span>**TOTAL DUE:**</span>
+                <span>**{{ sale.total | money }}**</span>
+            </div>
+        </div>
+    </div>
+    
+    <div class="receipt-footer mt-4">
+        <small class="text-small">*** THANK YOU FOR YOUR BUSINESS ***</small>
+    </div>
+
+    <div class="no-print">
+        <button onclick="window.close()" class="btn btn-secondary btn-sm mt-3">Close Window</button>
+    </div>
+</body>
+</html>

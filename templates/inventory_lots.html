@@ -1,0 +1,99 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid mt-3">
+    <div class="page-header d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-layers me-2"></i>Inventory Lots (FIFO)</h2>
+        <a href="{{ url_for('core.inventory') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-arrow-left"></i> Back to Inventory
+        </a>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body">
+            <h5>About FIFO Costing</h5>
+            <p>The system uses First-In, First-Out (FIFO) inventory costing. This means:</p>
+            <ul>
+                <li>Each purchase creates a new inventory "lot" with its own cost</li>
+                <li>When you sell items, the oldest lots are used first</li>
+                <li>This provides more accurate Cost of Goods Sold (COGS) calculations</li>
+                <li>You can track the age and cost of inventory more precisely</li>
+            </ul>
+        </div>
+    </div>
+
+    {% if product %}
+    <div class="card">
+        <div class="card-header">
+            <h4>{{ product.name }} ({{ product.sku }})</h4>
+            <p class="mb-0">Current Inventory: <strong>{{ product.quantity }}</strong> units</p>
+        </div>
+        <div class="card-body">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>Lot ID</th>
+                        <th>Date Created</th>
+                        <th>Age (Days)</th>
+                        <th>Qty Remaining</th>
+                        <th>Unit Cost</th>
+                        <th>Total Value</th>
+                        <th>Type</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for lot in lots %}
+                    <tr>
+                        <td>{{ lot.lot_id }}</td>
+                        <td>{{ lot.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
+                        <td>{{ lot.age_days }} days</td>
+                        <td>{{ lot.quantity }}</td>
+                        <td>₱{{ "%.2f"|format(lot.unit_cost) }}</td>
+                        <td>₱{{ "%.2f"|format(lot.total_value) }}</td>
+                        <td>
+                            {% if lot.is_opening_balance %}
+                                <span class="badge bg-info">Opening Balance</span>
+                            {% elif lot.movement_id %}
+                                <span class="badge bg-primary">Receive</span>
+                            {% elif lot.purchase_id %}
+                                <span class="badge bg-success">Purchase</span>
+                            {% else %}
+                                <span class="badge bg-secondary">Other</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="7" class="text-center text-muted">No inventory lots found</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+                <tfoot>
+                    <tr class="table-light fw-bold">
+                        <td colspan="3">TOTAL</td>
+                        <td>{{ total_qty }}</td>
+                        <td>Avg: ₱{{ "%.2f"|format(avg_cost) }}</td>
+                        <td>₱{{ "%.2f"|format(total_value) }}</td>
+                        <td></td>
+                    </tr>
+                </tfoot>
+            </table>
+
+            {% if reconciliation %}
+            <div class="alert {% if reconciliation.is_balanced %}alert-success{% else %}alert-warning{% endif %} mt-3">
+                <h6>Reconciliation Check:</h6>
+                <ul class="mb-0">
+                    <li>Product Quantity: {{ reconciliation.product_quantity }}</li>
+                    <li>Lot Total: {{ reconciliation.lot_total }}</li>
+                    {% if not reconciliation.is_balanced %}
+                    <li class="text-danger">Discrepancy: {{ reconciliation.discrepancy }}</li>
+                    {% else %}
+                    <li class="text-success">✅ Balanced</li>
+                    {% endif %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

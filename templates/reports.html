@@ -1,0 +1,225 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid my-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2><i class="bi bi-journal-text me-2"></i>Journal Entries</h2>
+    <a href="{{ url_for('accounts.new_journal_entry_form') }}" class="btn btn-primary">
+      <i class="bi bi-plus-circle me-1"></i> New Manual Entry
+    </a>
+  </div>
+
+  <!-- Filters -->
+  <div class="card mb-3 shadow-sm">
+    <div class="card-body">
+      <form method="get" class="row g-2">
+        <div class="col-md-4">
+          <input type="text" name="search" class="form-control" placeholder="🔍 Search description or account..." value="{{ request.args.get('search', '') }}">
+        </div>
+        <div class="col-md-3">
+          <input type="date" name="start_date" class="form-control" placeholder="Start Date" value="{{ start_date or '' }}">
+        </div>
+        <div class="col-md-3">
+          <input type="date" name="end_date" class="form-control" placeholder="End Date" value="{{ end_date or '' }}">
+        </div>
+        <div class="col-md-2">
+          <button type="submit" class="btn btn-secondary w-100">
+            <i class="bi bi-search"></i> Filter
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Journal Entries Table -->
+  <div class="card shadow-sm">
+    <div class="card-body">
+      <div class="table-responsive">
+        <table class="table table-hover align-middle">
+          <thead class="table-light">
+            <tr>
+              <th>ID</th>
+              <th>Date</th>
+              <th>Description</th>
+              <th class="text-end">Total Debit</th>
+              <th class="text-end">Total Credit</th>
+              <th>Status</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for je in journals %}
+            {% set entries = je.entries() %}
+            {% set total_debit = entries | sum(attribute='debit') %}
+            {% set total_credit = entries | sum(attribute='credit') %}
+            <!-- ✅ UPDATED: Added voided styling -->
+            <tr class="{{ 'table-secondary text-decoration-line-through' if je.voided_at else '' }}">
+              <td><strong>#{{ je.id }}</strong></td>
+              <td>{{ je.created_at.strftime('%Y-%m-%d %H:%M') if je.created_at else '—' }}</td>
+              <td>
+                {{ je.description }}
+                {% if je.description and je.description.startswith('[VOID]') %}
+                  <span class="badge bg-warning text-dark ms-1">Reversing Entry</span>
+                {% endif %}
+              </td>
+              <td class="text-end text-success">₱{{ "%.2f"|format(total_debit) }}</td>
+              <td class="text-end text-danger">₱{{ "%.2f"|format(total_credit) }}</td>
+              <!-- ✅ UPDATED: Added voided status badge -->
+              <td>
+                {% if je.voided_at %}
+                  <span class="badge bg-dark">VOIDED</span>
+                {% elif total_debit == total_credit %}
+                  <span class="badge bg-success">Balanced</span>
+                {% else %}
+                  <span class="badge bg-danger">Unbalanced</span>
+                {% endif %}
+              </td>
+              <!-- ✅ UPDATED: Added void button -->
+              <td>
+                <button class="btn btn-sm btn-outline-info" 
+                        data-bs-toggle="collapse" 
+                        data-bs-target="#je-{{ je.id }}">
+                  <i class="bi bi-eye"></i> View
+                </button>
+                
+                {% if not je.voided_at and je.description and je.description.startswith('[Manual]') %}
+                <button class="btn btn-sm btn-outline-danger" 
+                        data-bs-toggle="modal" 
+                        data-bs-target="#voidJEModal"
+                        onclick="setVoidJETarget('{{ url_for('void.void_journal_entry', je_id=je.id) }}', 'JE #{{ je.id }}')">
+                  <i class="bi bi-x-circle"></i> Void
+                </button>
+                {% endif %}
+              </td>
+            </tr>
+            <tr>
+              <td colspan="7" class="p-0">
+                <div class="collapse" id="je-{{ je.id }}">
+                  <div class="card card-body bg-light m-2">
+                    <!-- ✅ UPDATED: Show void info if voided -->
+                    {% if je.voided_at %}
+                    <div class="alert alert-danger mb-3">
+                      <h6><i class="bi bi-x-circle-fill me-2"></i>Journal Entry Voided</h6>
+                      <p class="mb-1"><strong>Voided At:</strong> {{ je.voided_at.strftime('%Y-%m-%d %H:%M') }}</p>
+                      <p class="mb-1"><strong>Voided By:</strong> {{ je.voided_by_user.username if je.voided_by_user else 'System' }}</p>
+                      <p class="mb-0"><strong>Reason:</strong> {{ je.void_reason }}</p>
+                    </div>
+                    {% endif %}
+                    
+                    <h6><strong>Entry Details:</strong></h6>
+                    <table class="table table-sm table-bordered">
+                      <thead>
+                        <tr>
+                          <th>Account Code</th>
+                          <th>Account Name</th>
+                          <th class="text-end">Debit</th>
+                          <th class="text-end">Credit</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {% for line in entries %}
+                        <tr>
+                          <td>{{ line.account_code }}</td>
+                          <td>{{ accounts_map.get(line.account_code, line.account_code) }}</td>
+                          <td class="text-end {{ 'text-success fw-bold' if line.debit > 0 else '' }}">
+                            {{ ('₱%.2f' | format(line.debit)) if line.debit > 0 else '—' }}
+                          </td>
+                          <td class="text-end {{ 'text-danger fw-bold' if line.credit > 0 else '' }}">
+                            {{ ('₱%.2f' | format(line.credit)) if line.credit > 0 else '—' }}
+                          </td>
+                        </tr>
+                        {% endfor %}
+                      </tbody>
+                      <tfoot class="table-light">
+                        <tr>
+                          <th colspan="2" class="text-end">Totals:</th>
+                          <th class="text-end text-success">₱{{ "%.2f"|format(total_debit) }}</th>
+                          <th class="text-end text-danger">₱{{ "%.2f"|format(total_credit) }}</th>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </div>
+                </div>
+              </td>
+            </tr>
+            {% else %}
+            <tr>
+              <td colspan="7" class="text-center text-muted py-3">No journal entries found.</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pagination -->
+  {% if pagination.pages > 1 %}
+  <nav aria-label="Journal entries pagination" class="mt-3">
+    <ul class="pagination justify-content-center">
+      {% if pagination.has_prev %}
+      <li class="page-item">
+        <a class="page-link" href="{{ url_for('core.journal_entries', page=pagination.prev_num, **safe_args) }}">Previous</a>
+      </li>
+      {% endif %}
+
+      <li class="page-item disabled">
+        <a class="page-link">Page {{ pagination.page }} of {{ pagination.pages }}</a>
+      </li>
+
+      {% if pagination.has_next %}
+      <li class="page-item">
+        <a class="page-link" href="{{ url_for('core.journal_entries', page=pagination.next_num, **safe_args) }}">Next</a>
+      </li>
+      {% endif %}
+    </ul>
+  </nav>
+  {% endif %}
+
+  <!-- Export Button -->
+  <div class="mt-3">
+    <a href="{{ url_for('core.export_journal_entries', **safe_args) }}" class="btn btn-outline-success">
+      <i class="bi bi-download"></i> Export to CSV
+    </a>
+  </div>
+</div>
+
+<!-- ✅ NEW: Void Journal Entry Modal -->
+<div class="modal fade" id="voidJEModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="voidJEForm" method="POST">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>Void Journal Entry
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-warning">
+            <strong>Warning:</strong> This will create a reversing entry with opposite debits/credits.
+          </div>
+          <p>Journal Entry: <strong id="voidJETargetName"></strong></p>
+          <div class="mb-3">
+            <label class="form-label"><strong>Void Reason *</strong></label>
+            <textarea name="void_reason" class="form-control" rows="3" placeholder="Enter reason for voiding this entry..." required></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">
+            <i class="bi bi-x-circle me-1"></i> Void Entry
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<script>
+function setVoidJETarget(actionUrl, targetName) {
+  document.getElementById('voidJEForm').action = actionUrl;
+  document.getElementById('voidJETargetName').textContent = targetName;
+}
+</script>
+
+{% endblock %}

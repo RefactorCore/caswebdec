@@ -1,0 +1,15 @@
+{% extends 'base_minimal.html' %}
+{% block title %}Software License{% endblock %}
+{% block content %}
+<h3 class="card-title text-center mb-1">Software License</h3>
+<p class="text-center text-muted mb-4">Enter your license key to begin.</p>
+<form method="POST">
+    <div class="mb-3">
+      <label for="license_key" class="form-label">License Key</label>
+      <input type="text" class="form-control" id="license_key" name="license_key" placeholder="For testing, use: test123">
+    </div>
+    <div class="d-grid">
+      <button type="submit" class="btn btn-primary">Continue</button>
+    </div>
+</form>
+{% endblock %}

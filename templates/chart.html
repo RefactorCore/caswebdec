@@ -1,0 +1,9 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>Chart of Accounts</h2>
+<table><thead><tr><th>Code</th><th>Name</th><th>Type</th></tr></thead><tbody>
+{% for a in accounts %}
+<tr><td>{{ a.code if a.code else '' }}</td><td>{{ a.name }}</td><td>{{ a.type if a.type else '' }}</td></tr>
+{% endfor %}
+</tbody></table>
+{% endblock %}

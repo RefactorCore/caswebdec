@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Coretally</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css" rel="stylesheet">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+
+ 
+
+  <style>
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background-color: #f8f9fa;
+    }
+    .sidebar {
+      min-height: 100vh;
+      height: 100vh; /* <-- ADD THIS LINE */
+      overflow-y: auto;
+      background-color: #0d6efd;
+      color: white;
+      position: fixed;
+      width: 230px;
+      top: 0;
+      left: 0;
+      padding-top: 1rem;
+    }
+    .sidebar a {
+      color: #e0e0e0;
+      text-decoration: none;
+      display: block;
+      padding: 10px 20px;
+      border-radius: 8px;
+      margin: 2px 10px;
+      font-size: 0.95rem;
+    }
+    .sidebar a:hover, .sidebar a.active {
+      background-color: rgba(255, 255, 255, 0.2);
+      color: #fff;
+    }
+    .main-content {
+      margin-left: 230px;
+      padding: 20px;
+      flex: 1;
+    }
+    header {
+      background-color: #ffffff;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+      padding: 15px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    header h1 {
+      font-size: 1.3rem;
+      margin: 0;
+    }
+    @media (max-width: 992px) {
+      .sidebar {
+        display: none;
+      }
+      .main-content {
+        margin-left: 0;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <div class="sidebar">
+    <div class="px-3 mb-3">
+      <h5 class="fw-bold text-white mb-0">💼 Coretally</h5>
+    </div>
+    <hr class="border-light my-2">
+
+    <nav class="nav flex-column">
+      <a href="{{ url_for('core.index') }}" class="{% if request.path == '/' %}active{% endif %}">
+        <i class="bi bi-speedometer2 me-2"></i> Dashboard
+      </a>
+      <a href="{{ url_for('core.pos') }}" class="{% if '/pos' in request.path %}active{% endif %}">
+        <i class="bi bi-cart3 me-2"></i> POS
+      </a>
+      <a href="{{ url_for('consignment.suppliers') }}" class="{% if '/consignment' in request.path %}active{% endif %}">
+        <i class="bi bi-box2-heart me-2"></i> Consignment
+      </a>
+      <a href="{{ url_for('core.inventory') }}" class="{% if request.endpoint == 'core.inventory' %}active{% endif %}">
+        <i class="bi bi-box-seam me-2"></i> Inventory
+      </a>
+      <a href="{{ url_for('core.stock_adjustments') }}" class="{% if request.endpoint == 'core.stock_adjustments' %}active{% endif %}">
+        <i class="bi bi-arrow-down-up"></i> Stock Adjustments
+      </a>
+      <a href="{{ url_for('core.inventory_movement') }}" class="{% if request.endpoint == 'core.inventory_movement' %}active{% endif %}">
+        <i class="bi bi-arrow-left-right"></i> Inventory Movement
+      </a>
+      <a href="{{ url_for('core.purchase') }}" class="{% if '/purchase' == request.path %}active{% endif %}">
+        <i class="bi bi-bag-plus me-2"></i> New Purchase
+      </a>
+      <a href="{{ url_for('core.purchases') }}" class="{% if '/purchases' == request.path or '/purchase/' in request.path %}active{% endif %}">
+        <i class="bi bi-bag-check me-2"></i> Purchases
+      </a>
+      <a href="{{ url_for('core.sales') }}" class="{% if '/sales' in request.path %}active{% endif %}">
+        <i class="bi bi-receipt-cutoff me-2"></i> All Sales
+      </a>
+      
+      <a href="{{ url_for('ar_ap.billing_invoices') }}" class="{% if request.endpoint == 'ar_ap.billing_invoices' %}active{% endif %}">
+        <i class="bi bi-file-earmark-spreadsheet me-2"></i> Billing Invoices (Credit)
+      </a>
+      
+      {% if current_user.role in ['Admin', 'Accountant'] %}
+      
+      <hr class="border-light my-2">
+      <h6 class="text-white-50 px-3 mt-2 mb-1" style="font-size: 0.8rem;">ACCOUNTING AND REPORTS</h6>
+
+      <a href="{{ url_for('core.journal_entries') }}" class="{% if '/journal-entries' in request.path %}active{% endif %}">
+        <i class="bi bi-journal-text me-2"></i> Journals
+      </a>
+      <a href="{{ url_for('accounts.new_journal_entry_form') }}" class="{% if 'journal/new' in request.path %}active{% endif %}">
+        <i class="bi bi-plus-circle me-2"></i> New Journal Entry
+      </a>
+      <a href="{{ url_for('accounts.chart_of_accounts') }}" class="{% if request.endpoint == 'accounts.chart_of_accounts' %}active{% endif %}">
+        <i class="bi bi-list-columns-reverse me-2"></i> Chart of Accounts
+      </a>
+
+      {% set financial_reports_active = request.endpoint in [
+          'reports.general_ledger',
+          'reports.trial_balance', 
+          'reports.income_statement', 
+          'reports.balance_sheet'
+      ] %}
+      <a class="text-white {% if financial_reports_active %}active{% endif %}" data-bs-toggle="collapse" href="#financialReportsSubmenu" role="button" aria-expanded="{% if financial_reports_active %}true{% else %}false{% endif %}" aria-controls="financialReportsSubmenu">
+        <i class="bi bi-file-earmark-bar-graph me-2"></i> Financial Reports
+      </a>
+      <div class="collapse {% if financial_reports_active %}show{% endif %}" id="financialReportsSubmenu">
+          <a href="{{ url_for('reports.general_ledger') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.general_ledger' %}active{% endif %}">
+            - General Ledger
+          </a>
+          <a href="{{ url_for('reports.trial_balance') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.trial_balance' %}active{% endif %}">
+            - Trial Balance
+          </a>
+          <a href="{{ url_for('reports.income_statement') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.income_statement' %}active{% endif %}">
+            - Income Statement
+          </a>
+          <a href="{{ url_for('reports.balance_sheet') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.balance_sheet' %}active{% endif %}">
+            - Balance Sheet
+          </a>
+      </div>
+
+      {% set ar_ap_active = request.endpoint in [
+          'reports.ar_aging', 
+          'reports.ap_aging', 
+          'ar_ap.credit_memos',
+          'ar_ap.customers',
+          'ar_ap.suppliers',
+          'ar_ap.ar_invoices',
+          'ar_ap.ap_invoices',
+          'ar_ap.recurring_bills',
+          'ar_ap.billing_invoices'
+      ] %}
+      <a class="text-white {% if ar_ap_active %}active{% endif %}" data-bs-toggle="collapse" href="#arApSubmenu" role="button" aria-expanded="{% if ar_ap_active %}true{% else %}false{% endif %}" aria-controls="arApSubmenu">
+        <i class="bi bi-people me-2"></i> Receivables & Payables
+      </a>
+      <div class="collapse {% if ar_ap_active %}show{% endif %}" id="arApSubmenu">
+          
+          <h6 class="text-white-50 px-3 mt-2 mb-1 ms-3" style="font-size: 0.8rem;">ENTITIES</h6> 
+          
+          <a href="{{ url_for('ar_ap.customers') }}" class="ms-3 ps-4 {% if request.endpoint == 'ar_ap.customers' %}active{% endif %}">
+            - Customers
+          </a>
+          <a href="{{ url_for('ar_ap.suppliers') }}" class="ms-3 ps-4 {% if request.endpoint == 'ar_ap.suppliers' %}active{% endif %}">
+            - Suppliers
+          </a>
+
+          <h6 class="text-white-50 px-3 mt-2 mb-1 ms-3" style="font-size: 0.8rem;">DOCUMENTS & AGING</h6>
+
+          <a href="{{ url_for('ar_ap.ap_invoices') }}" class="ms-3 ps-4 {% if request.endpoint == 'ar_ap.ap_invoices' %}active{% endif %}">
+            - AP Invoices
+          </a>
+          <a href="{{ url_for('ar_ap.recurring_bills') }}" class="ms-3 ps-4 {% if request.endpoint == 'ar_ap.recurring_bills' %}active{% endif %}">
+            - Recurring Bills
+          </a>
+
+          <a href="{{ url_for('reports.ar_aging') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.ar_aging' %}active{% endif %}">
+            - AR Aging
+          </a>
+          <a href="{{ url_for('reports.ap_aging') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.ap_aging' %}active{% endif %}">
+            - AP Aging
+          </a>
+          <a href="{{ url_for('ar_ap.credit_memos') }}" class="ms-3 ps-4 {% if request.endpoint == 'ar_ap.credit_memos' %}active{% endif %}">
+            - Credit Memos
+          </a>
+      </div>
+      
+      {% set tax_reports_active = request.endpoint in [
+          'reports.vat_report', 
+          'reports.vat_return', 
+          'reports.summary_list_sales', 
+          'reports.summary_list_purchases', 
+          'reports.form_2307_report'
+      ] %}
+      <a class="text-white {% if tax_reports_active %}active{% endif %}" data-bs-toggle="collapse" href="#taxReportsSubmenu" role="button" aria-expanded="{% if tax_reports_active %}true{% else %}false{% endif %}" aria-controls="taxReportsSubmenu">
+        <i class="bi bi-percent me-2"></i> Tax Reports
+      </a>
+      <div class="collapse {% if tax_reports_active %}show{% endif %}" id="taxReportsSubmenu">
+          <a href="{{ url_for('reports.vat_report') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.vat_report' %}active{% endif %}">
+            - VAT Report
+          </a>
+          <a href="{{ url_for('reports.vat_return') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.vat_return' %}active{% endif %}">
+            - VAT Return
+          </a>
+          <a href="{{ url_for('reports.summary_list_sales') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.summary_list_sales' %}active{% endif %}">
+            - Summary List of Sales
+          </a>
+          <a href="{{ url_for('reports.summary_list_purchases') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.summary_list_purchases' %}active{% endif %}">
+            - Summary List of Purchases
+          </a>
+           <a href="{{ url_for('reports.form_2307_report') }}" class="ms-3 ps-4 {% if request.endpoint == 'reports.form_2307_report' %}active{% endif %}">
+            - Form 2307 Data
+          </a>
+      </div>
+      {% endif %}
+      
+      {% if current_user.role == 'Admin' %}
+      
+      <hr class="border-light my-2">
+      <h6 class="text-white-50 px-3 mt-2 mb-1" style="font-size: 0.8rem;">ADMIN</h6>
+
+      <a href="{{ url_for('core.audit_log') }}" class="{% if '/audit-log' in request.path %}active{% endif %}">
+        <i class="bi bi-shield-check me-2"></i> Audit Log
+      </a>
+      <a href="{{ url_for('core.settings') }}" class="{% if '/settings' in request.path %}active{% endif %}">
+        <i class="bi bi-gear me-2"></i> Settings
+      </a>
+      {% endif %}
+    </nav>
+  </div>
+
+  <div class="main-content">
+    <header>
+      <h1>{{ company.name if company else 'Coretally' }}</h1>
+      <div>
+        <i class="bi bi-person-circle me-2"></i> {{ current_user.username }}
+        <a href="{{ url_for('core.logout') }}" class="ms-2 btn btn-sm btn-outline-secondary">Logout</a>
+      </div>
+    </header>
+
+    <div class="container-fluid mt-3">
+      {% with messages = get_flashed_messages() %}
+        {% if messages %}
+          <div class="alert alert-info">
+            {% for m in messages %}<div>{{ m }}</div>{% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+
+      {% block content %}{% endblock %}
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+
+<script>
+  const sidebar = document.querySelector('.sidebar');
+
+  // Save scroll position before leaving the page
+  window.addEventListener('beforeunload', () => {
+    if (sidebar) {
+      sessionStorage.setItem('sidebarScroll', sidebar.scrollTop);
+    }
+  });
+
+  // Restore scroll position when the page loads
+  window.addEventListener('DOMContentLoaded', () => {
+    const scrollPos = sessionStorage.getItem('sidebarScroll');
+    if (scrollPos && sidebar) {
+      sidebar.scrollTop = parseInt(scrollPos);
+    }
+  });
+</script>
+{% block scripts %}
+{% endblock %}
+
+</body>
+</html>

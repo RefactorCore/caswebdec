@@ -1,0 +1,62 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>Summary List of Purchases (SLP)</h3>
+</div>
+
+<div class="card mb-3">
+    <div class="card-body">
+        <form method="GET" class="row g-3 align-items-end">
+            <div class="col-md-3">
+                <label for="month" class="form-label">Select Month</label>
+                <input type="month" id="month" name="month" value="{{ month }}" class="form-control">
+            </div>
+            <div class="col-md-3">
+                <button type="submit" class="btn btn-primary">Generate Report</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h4>Report for {{ month }}</h4>
+    </div>
+    <div class="card-body">
+        <table class="table table-striped table-hover">
+            <thead>
+                <tr>
+                    <th>Supplier TIN</th>
+                    <th>Supplier Name</th>
+                    <th class="text-end">Net Purchases</th>
+                    <th class="text-end">Input VAT</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for purchase in purchases %}
+                <tr>
+                    <td>{{ purchase.tin }}</td>
+                    <td>{{ purchase.name }}</td>
+                    <td class="text-end">{{ purchase.net_purchases|money }}</td>
+                    <td class="text-end">{{ purchase.input_vat|money }}</td>
+                </tr>
+                {% else %}
+                <tr>
+                    <td colspan="4" class="text-center text-muted">No purchase data found for this period.</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+            {% if purchases %}
+            <tfoot class="table-group-divider">
+                <tr class="fw-bold">
+                    <td colspan="2">Grand Total</td>
+                    <td class="text-end">{{ grand_total_net|money }}</td>
+                    <td class="text-end">{{ grand_total_vat|money }}</td>
+                </tr>
+            </tfoot>
+            {% endif %}
+        </table>
+    </div>
+</div>
+{% endblock %}

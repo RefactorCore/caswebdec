@@ -1,0 +1,474 @@
+{% extends 'base.html' %}
+{% block content %}
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+
+<style>
+/* SKU Status Indicators */
+.sku-status-new {
+    border-left: 4px solid #ffc107 !important;
+}
+.sku-status-exists {
+    border-left: 4px solid #28a745 !important;
+}
+.sku-alert {
+    display: block;
+    font-size: 0.85rem;
+    margin-top: 0.25rem;
+}
+#skuSearchResults tr {
+    cursor: pointer;
+}
+#skuSearchResults tr:hover {
+    background-color: #f0f0f0;
+}
+</style>
+
+<div class="container-fluid py-4">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="fw-bold text-primary">🧾 New Purchase</h2>
+    <a href="{{ url_for('core.purchases') }}" class="btn btn-outline-secondary">📜 View Purchase History</a>
+  </div>
+
+  <!-- ✅ NEW: SKU Guidelines Alert -->
+  <div class="alert alert-info alert-dismissible fade show" role="alert">
+    <h6><i class="bi bi-info-circle"></i> SKU Guidelines for Inventory:</h6>
+    <ul class="mb-0 small">
+      <li><strong>Different brands/models = Different SKUs</strong></li>
+      <li><strong>Format Example:</strong> <code>DENSO-AIRFILTER-A1</code>, <code>NGK-SPARKPLUG-BKR6E</code></li>
+      <li>💡 <strong>Tip:</strong> Use the "🔍 Search Products" button below to check existing SKUs before adding new ones</li>
+    </ul>
+    <button type="button" class="btn-close" data-dismiss="alert" aria-label="Close"></button>
+  </div>
+
+  <form method="post" id="purchase-form" class="card shadow-sm p-4">
+    <div class="row mb-3">
+      <div class="col-md-5">
+        <label class="form-label fw-semibold">Supplier</label>
+        <input id="supplier" name="supplier" class="form-control" placeholder="Search or type new supplier..." list="supplier-list" required>
+        <datalist id="supplier-list">
+          {% for s in suppliers %}
+            <option value="{{ s.name }}"></option>
+          {% endfor %}
+        </datalist>
+      </div>
+      <div class="col-md-3">
+        <label class="form-label fw-semibold">Purchase Date</label>
+        <input type="date" name="date" class="form-control" value="{{ today }}">
+      </div>
+
+      <div class="col-md-2">
+        <label class="form-label fw-semibold">Vatable</label>
+        <div class="form-check">
+          <input class="form-check-input" type="checkbox" name="is_vatable" id="purchaseIsVatable">
+          <label class="form-check-label" for="purchaseIsVatable">Apply VAT (12%)</label>
+        </div>
+      </div>
+
+      <div class="col-md-2 d-flex align-items-end justify-content-end">
+        <button type="submit" class="btn btn-success px-4">💾 Record Purchase</button>
+      </div>
+    </div>
+
+    <hr>
+
+    <!-- ✅ NEW: Product Search Button -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h5 class="fw-bold mb-0">Add Items to Purchase</h5>
+      <button type="button" class="btn btn-info btn-sm" data-bs-toggle="modal" data-bs-target="#skuLookupModal">
+        <i class="bi bi-search"></i> 🔍 Search Existing Products
+      </button>
+    </div>
+
+    <!-- Existing Product Quick Select (Keep this for backward compatibility) -->
+    <div class="row g-2 align-items-end mb-2">
+      <div class="col-md-12">
+        <label class="form-label">Or Quick Select from Existing Products:</label>
+        <select id="product-select" class="form-select">
+          <option value="">-- select existing product to auto-fill --</option>
+          {% for p in products %}
+            <option value="{{ p.sku }}" data-name="{{ p.name }}" data-cost="{{ p.cost_price }}">{{ p.sku }} - {{ p.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    
+    <!-- Add Item Form -->
+    <div class="row g-2 align-items-end mt-2">
+      <div class="col-md-3">
+        <label class="form-label">SKU </label>
+        <input id="p-sku" type="text" class="form-control" placeholder="Enter SKU" />
+        <!-- ✅ NEW: SKU Status Alert -->
+        <small id="sku-status-alert" class="sku-alert"></small>
+      </div>
+      <div class="col-md-4">
+        <label class="form-label">Product Name <span class="text-danger">*</span></label>
+        <input id="p-name" type="text" class="form-control" placeholder="Enter product name" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Qty</label>
+        <input id="p-qty" type="number" value="1" min="1" class="form-control" />
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Unit Cost</label>
+        <input id="p-unit" type="number" step="0.01" value="0.00" class="form-control" />
+      </div>
+      <div class="col-md-1">
+        <button id="add-p" type="button" class="btn btn-primary w-100">➕ Add</button>
+      </div>
+    </div>
+    <hr class="my-4">
+
+    <h5 class="fw-bold">Items</h5>
+    <table id="p-items" class="table table-striped table-hover align-middle">
+      <thead class="table-light">
+        <tr>
+          <th>SKU</th><th>Name</th><th>Qty</th><th>Unit Cost</th><th>Net</th><th>VAT (12%)</th><th>Line Total</th><th></th>
+        </tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+
+    <div class="text-end mt-3">
+      <p><strong>Subtotal:</strong> ₱<span id="p-subtotal">0.00</span></p>
+      <p><strong>VAT (12%):</strong> ₱<span id="p-vat">0.00</span></p>
+      <p class="fs-5 fw-bold text-success">Total: ₱<span id="p-total">0.00</span></p>
+    </div>
+
+    <input type="hidden" name="items_json" id="items_json" />
+  </form>
+</div>
+
+<!-- ✅ NEW: SKU Lookup Modal -->
+<div class="modal fade" id="skuLookupModal" tabindex="-1" aria-labelledby="skuLookupModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+      <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title" id="skuLookupModalLabel">
+          <i class="bi bi-search"></i> Search Existing Products
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <input type="text" 
+                 id="skuSearchInput" 
+                 class="form-control form-control-lg" 
+                 placeholder="🔍 Type SKU or product name to search..." 
+                 autocomplete="off">
+        </div>
+        
+        <div class="table-responsive" style="max-height: 400px; overflow-y: auto;">
+          <table class="table table-hover table-striped">
+            <thead class="table-light sticky-top">
+              <tr>
+                <th>SKU</th>
+                <th>Product Name</th>
+                <th>Current Stock</th>
+                <th>Cost Price</th>
+                <th>Sale Price</th>
+                <th>Action</th>
+              </tr>
+            </thead>
+            <tbody id="skuSearchResults">
+              <tr>
+                <td colspan="6" class="text-center text-muted">
+                  Type to search or scroll to browse all products...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const VAT_RATE = 0.12;
+let items = [];
+
+// ✅ NEW: Check if SKU exists in real-time
+function checkSkuExists(sku) {
+  const skuInput = document.getElementById('p-sku');
+  const nameInput = document.getElementById('p-name');
+  const costInput = document.getElementById('p-unit');
+  const statusAlert = document.getElementById('sku-status-alert');
+  
+  // Case A: Empty SKU -> Auto Generation
+  if (!sku || sku.trim() === '') {
+    skuInput.classList.remove('sku-status-new', 'sku-status-exists');
+    nameInput.readOnly = false;
+    
+    // Visual feedback for Auto-Gen
+    statusAlert.className = 'sku-alert text-info';
+    statusAlert.innerHTML = `<i class="bi bi-magic"></i> <strong>Auto-Generate SKU:</strong> Leave blank to auto-create SKU from Name`;
+    return;
+  }
+
+  fetch(`/api/product/${encodeURIComponent(sku.trim())}`)
+    .then(res => {
+      if (res.ok) return res.json();
+      if (res.status === 404) return null;
+      throw new Error('Failed to check SKU');
+    })
+    .then(product => {
+      if (product) {
+        // SKU Exists
+        skuInput.classList.remove('sku-status-new');
+        skuInput.classList.add('sku-status-exists');
+        
+        nameInput.value = product.name;
+        nameInput.readOnly = true;
+        costInput.value = product.cost_price.toFixed(2);
+        
+        statusAlert.className = 'sku-alert text-success';
+        statusAlert.innerHTML = `✅ <strong>Existing:</strong> ${product.name} (Stock: ${product.quantity})`;
+      } else {
+        // New Custom SKU
+        skuInput.classList.remove('sku-status-exists');
+        skuInput.classList.add('sku-status-new');
+        nameInput.readOnly = false;
+        
+        statusAlert.className = 'sku-alert text-warning';
+        statusAlert.innerHTML = `🆕 <strong>New SKU:</strong> System will create this specific SKU`;
+      }
+    })
+    .catch(err => {
+      console.error(err);
+      statusAlert.className = 'sku-alert text-danger';
+      statusAlert.textContent = '⚠️ Error checking SKU';
+    });
+}
+
+// ✅ NEW: Search products in modal
+function searchProducts(query) {
+  const resultsBody = document.getElementById('skuSearchResults');
+  
+  if (!query || query.trim() === '') {
+    // Show all products if search is empty
+    fetch('/api/products/search?q=')
+      .then(res => res.json())
+      .then(products => displaySearchResults(products))
+      .catch(err => {
+        console.error('Error fetching products:', err);
+        resultsBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error loading products</td></tr>';
+      });
+    return;
+  }
+
+  fetch(`/api/products/search?q=${encodeURIComponent(query)}`)
+    .then(res => res.json())
+    .then(products => displaySearchResults(products))
+    .catch(err => {
+      console.error('Error searching products:', err);
+      resultsBody.innerHTML = '<tr><td colspan="6" class="text-center text-danger">Error searching products</td></tr>';
+    });
+}
+
+// ✅ NEW: Display search results
+function displaySearchResults(products) {
+  const resultsBody = document.getElementById('skuSearchResults');
+  
+  if (products.length === 0) {
+    resultsBody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No products found</td></tr>';
+    return;
+  }
+
+  resultsBody.innerHTML = '';
+  products.forEach(p => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td><strong>${p.sku}</strong></td>
+      <td>${p.name}</td>
+      <td><span class="badge ${p.quantity > 0 ? 'bg-success' : 'bg-secondary'}">${p.quantity}</span></td>
+      <td>₱${p.cost_price.toFixed(2)}</td>
+      <td>₱${p.sale_price.toFixed(2)}</td>
+      <td>
+        <button class="btn btn-sm btn-primary" onclick="selectProduct('${p.sku}', '${p.name.replace(/'/g, "\\'")}', ${p.cost_price})">
+          <i class="bi bi-check-circle"></i> Select
+        </button>
+      </td>
+    `;
+    resultsBody.appendChild(tr);
+  });
+}
+
+// ✅ NEW: Select product from search modal
+function selectProduct(sku, name, cost) {
+  document.getElementById('p-sku').value = sku;
+  document.getElementById('p-name').value = name;
+  document.getElementById('p-unit').value = cost.toFixed(2);
+  
+  // Trigger SKU check to show status
+  checkSkuExists(sku);
+  
+  // Close modal
+  const modal = bootstrap.Modal.getInstance(document.getElementById('skuLookupModal'));
+  modal.hide();
+  
+  // Focus on quantity input
+  document.getElementById('p-qty').focus();
+}
+
+// ✅ Event: Check SKU when user leaves the input
+document.getElementById('p-sku').addEventListener('blur', function() {
+  checkSkuExists(this.value);
+});
+
+// ✅ Event: Search products in modal
+document.getElementById('skuSearchInput').addEventListener('input', function(e) {
+  searchProducts(e.target.value);
+});
+
+// ✅ Event: Load all products when modal opens
+document.getElementById('skuLookupModal').addEventListener('shown.bs.modal', function() {
+  searchProducts(''); // Load all products initially
+  document.getElementById('skuSearchInput').focus();
+});
+
+// ✅ Event: Clear search when modal closes
+document.getElementById('skuLookupModal').addEventListener('hidden.bs.modal', function() {
+  document.getElementById('skuSearchInput').value = '';
+});
+
+/**
+ * Recalculate per-line VAT/net/line_total for all items depending on
+ * whether the purchase is marked vatable. Called on toggle and before render.
+ */
+function recalcItems() {
+  const purchaseIsVatable = document.getElementById('purchaseIsVatable').checked;
+  for (const it of items) {
+    it.net = Math.round((it.qty * it.unit_cost) * 100) / 100;
+    if (purchaseIsVatable) {
+      it.vat = Math.round(it.net * VAT_RATE * 100) / 100;
+    } else {
+      it.vat = 0.00;
+    }
+    it.line_total = Math.round((it.net + it.vat) * 100) / 100;
+  }
+}
+
+function render() {
+  recalcItems();
+  const tbody = document.querySelector('#p-items tbody');
+  tbody.innerHTML = '';
+  let subtotal = 0, vat_total = 0;
+
+  for (const [i, it] of items.entries()) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td>${it.sku}</td>
+      <td>${it.name}</td>
+      <td>${it.qty}</td>
+      <td>${it.unit_cost.toFixed(2)}</td>
+      <td>${it.net.toFixed(2)}</td>
+      <td>${it.vat.toFixed(2)}</td>
+      <td>${it.line_total.toFixed(2)}</td>
+      <td><button class="btn btn-sm btn-outline-danger" onclick="removeItem(${i})">✕</button></td>
+    `;
+    tbody.appendChild(tr);
+    subtotal += it.net;
+    vat_total += it.vat;
+  }
+
+  document.getElementById('p-subtotal').textContent = subtotal.toFixed(2);
+  document.getElementById('p-vat').textContent = vat_total.toFixed(2);
+  document.getElementById('p-total').textContent = (subtotal + vat_total).toFixed(2);
+  document.getElementById('items_json').value = JSON.stringify(items);
+}
+
+function removeItem(i) {
+  items.splice(i, 1);
+  render();
+}
+
+// Initialize TomSelect for product select
+new TomSelect('#product-select', {
+  create: false,
+  sortField: { field: "text", direction: "asc" },
+  onChange: (sku) => {
+    const sel = document.getElementById('product-select');
+    if (!sku) {
+      document.getElementById('p-sku').value = '';
+      document.getElementById('p-name').value = '';
+      document.getElementById('p-unit').value = '0.00';
+      return;
+    }
+    const opt = sel.options[sel.selectedIndex];
+    const name = opt.dataset.name;
+    const cost = parseFloat(opt.dataset.cost) || 0.00;
+    document.getElementById('p-sku').value = sku;
+    document.getElementById('p-name').value = name;
+    document.getElementById('p-unit').value = cost.toFixed(2);
+    
+    // ✅ Trigger SKU check
+    checkSkuExists(sku);
+  }
+});
+
+// Add Item button click
+document.getElementById('add-p').onclick = (e) => {
+  e.preventDefault();
+
+  let sku = document.getElementById('p-sku').value.trim();
+  const name = document.getElementById('p-name').value.trim();
+  const qty = parseInt(document.getElementById('p-qty').value) || 0;
+  const unit = parseFloat(document.getElementById('p-unit').value) || 0;
+
+  if (!name || qty <= 0) {
+    return alert('Product Name and a valid Quantity are required.');
+  }
+
+  if (!sku) {
+      sku = "AUTO"; 
+  }
+
+  const purchaseIsVatable = document.getElementById('purchaseIsVatable').checked;
+  const net = Math.round(qty * unit * 100) / 100;
+  const vat = purchaseIsVatable ? Math.round(net * VAT_RATE * 100) / 100 : 0.00;
+  const line_total = Math.round((net + vat) * 100) / 100;
+
+  items.push({ sku, name, qty, unit_cost: unit, net, vat, line_total });
+  render();
+
+  document.getElementById('p-sku').value = '';
+  document.getElementById('p-name').value = '';
+  document.getElementById('p-qty').value = 1;
+  document.getElementById('p-unit').value = '0.00';
+  if (document.getElementById('product-select').tomselect) {
+      document.getElementById('product-select').tomselect.clear();
+  }
+  
+  // Reset Status
+  document.getElementById('p-sku').classList.remove('sku-status-new', 'sku-status-exists');
+  document.getElementById('sku-status-alert').textContent = '';
+  document.getElementById('p-name').readOnly = false;
+  document.getElementById('p-sku').focus();
+
+  checkSkuExists('');
+};
+
+// When purchase-level vatable checkbox changes
+document.getElementById('purchaseIsVatable').addEventListener('change', () => {
+  render();
+});
+
+// Final form submission
+document.getElementById('purchase-form').addEventListener('submit', (e) => {
+  if (items.length === 0) {
+    e.preventDefault();
+    alert('Cannot record a purchase with no items. Please add at least one item.');
+    return;
+  }
+
+  recalcItems();
+  document.getElementById('items_json').value = JSON.stringify(items);
+});
+
+checkSkuExists('');
+</script>
+{% endblock %}

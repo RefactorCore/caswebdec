@@ -1,0 +1,73 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2 class="fw-bold text-primary mb-0">📚 General Ledger</h2>
+        <a href="{{ url_for('reports.export_general_ledger', start_date=start_date, end_date=end_date) }}" class="btn btn-success">
+            ⬇ Export CSV
+        </a>
+    </div>
+    
+    <form method="GET" class="row g-3 align-items-center mb-3">
+        <div class="col-auto">
+            <label for="start_date" class="col-form-label">Start Date:</label>
+        </div>
+        <div class="col-auto">
+            <input type="date" id="start_date" name="start_date" class="form-control" value="{{ start_date or '' }}">
+        </div>
+        <div class="col-auto">
+            <label for="end_date" class="col-form-label">End Date:</label>
+        </div>
+        <div class="col-auto">
+            <input type="date" id="end_date" name="end_date" class="form-control" value="{{ end_date or '' }}">
+        </div>
+        <div class="col-auto">
+            <button type="submit" class="btn btn-primary">Filter</button>
+        </div>
+        {% if start_date or end_date %}
+        <div class="col-auto">
+            <a href="{{ url_for('reports.general_ledger') }}" class="btn btn-outline-danger">Clear Filter</a>
+        </div>
+        {% endif %}
+    </form>
+    <p class="text-muted">
+        Aggregated net balances for the period 
+        <span class="fw-bold">{{ start_date or 'Beginning of Time' }}</span> to 
+        <span class="fw-bold">{{ end_date or 'Current Date' }}</span>.
+    </p>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <table class="table table-bordered table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Account</th>
+                        <th class="text-end">Net Debits (₱)</th>
+                        <th class="text-end">Net Credits (₱)</th>
+                        <th class="text-end">Balance (₱)</th>
+                        <th class="text-center">Balance Type</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in gl_data %}
+                    <tr>
+                        <td>{{ item.account }}</td>
+                        <td class="text-end">{{ item.debit | money }}</td>
+                        <td class="text-end">{{ item.credit | money }}</td>
+                        <td class="text-end fw-bold">
+                            {{ item.balance | money }}
+                        </td>
+                        <td class="text-center">
+                            <span class="badge bg-{{ 'primary' if item.balance_type == 'Debit' else 'danger' }}">
+                                {{ item.balance_type }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

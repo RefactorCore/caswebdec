@@ -1,0 +1,90 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h3>Credit Memos (Sales Returns)</h3>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#newMemoModal">
+        <i class="bi bi-plus-circle me-1"></i> New Credit Memo
+    </button>
+</div>
+
+<div class="modal fade" id="newMemoModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create Credit Memo</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Customer</label>
+                        <select name="customer_id" class="form-select" required>
+                            {% for c in customers %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Reason</label>
+                        <input type="text" name="reason" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Original AR Invoice (Optional)</label>
+                        <select name="ar_invoice_id" class="form-select">
+                            <option value="">None</option>
+                            {% for inv in invoices %}<option value="{{ inv.id }}">#{{ inv.id }} - {{ inv.customer.name }} ({{ inv.total|money }})</option>{% endfor %}
+                        </select>
+                    </div>
+                    <p class="text-muted">Optional: Return item to stock</p>
+                    <div class="mb-3">
+                        <label class="form-label">Product to Return</label>
+                        <select name="return_product_id" class="form-select">
+                            <option value="">None (financial adjustment only)</option>
+                            {% for p in products %}<option value="{{ p.id }}">{{ p.sku }} - {{ p.name }}</option>{% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Quantity to Return</label>
+                        <input type="number" step="1" name="return_quantity" class="form-control" placeholder="0">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Total Return Amount (Gross)</label>
+                        <input type="number" step="0.01" name="total_amount" class="form-control" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-primary">Save Credit Memo</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-body">
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Date</th>
+                    <th>Customer</th>
+                    <th>Reason</th>
+                    <th class="text-end">Total Amount</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for memo in memos %}
+                <tr>
+                    <td>CM-{{ memo.id }}</td>
+                    <td>{{ memo.date.strftime('%Y-%m-%d') }}</td>
+                    <td>{{ memo.customer.name }}</td>
+                    <td>{{ memo.reason }}</td>
+                    <td class="text-end">{{ memo.total_amount|money }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="5" class="text-center">No credit memos found.</td></tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}

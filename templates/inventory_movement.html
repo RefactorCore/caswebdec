@@ -1,0 +1,345 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="page-header d-flex justify-content-between align-items-center">
+  <h2><i class="bi bi-arrow-left-right me-2"></i>Inventory Movement</h2>
+  <div>
+    <a href="{{ url_for('core.manage_branches') }}" class="btn btn-outline-secondary me-2">
+      <i class="bi bi-building me-1"></i>Manage Branches
+    </a>
+    <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createMovementModal">
+      <i class="bi bi-plus-circle me-1"></i> New Movement
+    </button>
+  </div>
+</div>
+
+  <!-- Branches Section -->
+  <div class="card mb-3">
+    <div class="card-header">
+      <h5>Branches</h5>
+    </div>
+    <div class="card-body">
+      <div class="row">
+        {% for branch in branches %}
+        <div class="col-md-4 mb-3">
+          <div class="card">
+            <div class="card-body">
+              <h6>{{ branch.name }}</h6>
+              <p class="text-muted">{{ branch.address or 'No address' }}</p>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Movements History -->
+  <div class="card">
+    <div class="card-header">
+      <h5>Movement History</h5>
+    </div>
+    <div class="card-body">
+      <table class="table table-striped" id="movementsTable">
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Type</th>
+            <th>From</th>
+            <th>To</th>
+            <th>Items</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for movement in movements %}
+          <tr>
+            <td>{{ movement.created_at.strftime('%Y-%m-%d') }}</td>
+            <td>{{ movement.movement_type.title() }}</td>
+            <td>{{ movement.from_branch.name if movement.from_branch else 'N/A' }}</td>
+            <td>{{ movement.to_branch.name if movement.to_branch else 'N/A' }}</td>
+            <td>
+              {% for item in movement.items %}
+                {{ item.product.name }}{% if not loop.last %}, {% endif %}
+              {% endfor %}
+              ({{ movement.items|length }} items)
+            </td>
+            <td>{{ movement.notes or '-' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- Create Movement Modal -->
+<div class="modal fade" id="createMovementModal" tabindex="-1" aria-labelledby="createMovementModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="createMovementModalLabel">Create Inventory Movement</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+      <div class="modal-body">
+        <form id="movementForm" action="{{ url_for('core.create_inventory_movement') }}" method="POST" enctype="multipart/form-data">
+          <div class="mb-3">
+            <label for="movement_type" class="form-label">Movement Type</label>
+            <select class="form-select" name="movement_type" id="movement_type" required>
+              <option value="receive">Receive</option>
+              <option value="transfer">Transfer</option>
+            </select>
+          </div>
+          <div class="row">
+            <div class="col-md-6">
+              <label for="from_branch_id" class="form-label">From Branch</label>
+              <select class="form-select" name="from_branch_id" id="from_branch_id">
+                <option value="">Select Branch</option>
+                {% for branch in branches %}
+                <option value="{{ branch.id }}" {% if branch.id == default_branch_id %}selected{% endif %}>{{ branch.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div class="col-md-6">
+              <label for="to_branch_id" class="form-label">To Branch</label>
+              <select class="form-select" name="to_branch_id" id="to_branch_id">
+                <option value="">Select Branch</option>
+                {% for branch in branches %}
+                <option value="{{ branch.id }}">{{ branch.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label for="notes" class="form-label">Notes</label>
+            <textarea class="form-control" name="notes" id="notes" rows="3"></textarea>
+          </div>
+
+          <!-- Tabbed Interface for Items -->
+          <ul class="nav nav-tabs" id="itemTabs" role="tablist">
+            <li class="nav-item" role="presentation">
+              <button class="nav-link active" id="manual-tab" data-bs-toggle="tab" data-bs-target="#manual" type="button" role="tab" aria-controls="manual" aria-selected="true">Manual Entry</button>
+            </li>
+            <li class="nav-item" role="presentation">
+              <button class="nav-link" id="csv-tab" data-bs-toggle="tab" data-bs-target="#csv" type="button" role="tab" aria-controls="csv" aria-selected="false">CSV Upload</button>
+            </li>
+          </ul>
+          <div class="tab-content" id="itemTabsContent">
+            <!-- Manual Entry Tab -->
+            <div class="tab-pane fade show active" id="manual" role="tabpanel" aria-labelledby="manual-tab">
+            <div class="mt-3">
+              <button type="button" class="btn btn-outline-primary btn-sm mb-3" id="addItemBtn">
+                <i class="bi bi-plus-circle me-1"></i>Add Product
+              </button>
+              <div id="itemsContainer">
+                <!-- Dynamic item rows will be added here -->
+              </div>
+            </div>
+          </div>
+            <!-- CSV Upload Tab -->
+            <div class="tab-pane fade" id="csv" role="tabpanel" aria-labelledby="csv-tab">
+              <div class="mt-3">
+                <div class="alert alert-info">
+                  <strong>CSV Format:</strong> Upload a CSV file with columns: <code>sku, productname, sale_price, cost_price, qty</code> (no header row).
+                  <br>Example:
+                  <br><code>SKU-001,Blue T-Shirt,350.00,200.00,10</code>
+                  <br><code>SKU-002,Red Cap,150.00,80.00,5</code>
+                </div>
+                <input type="file" class="form-control" name="csv_file" id="csv_file" accept=".csv">
+              </div>
+            </div>
+          </div>
+        </form>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+        <button type="submit" class="btn btn-primary" form="movementForm">Save Movement</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+// Template for item row (updated with product dropdown)
+const itemRowTemplate = `
+  <div class="item-row row g-2 mb-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label">Product</label>
+      <select class="form-select product-select" required>
+        <option value="">Select Product</option>
+        {% for product in all_active_products %}
+        <option value="{{ product.sku }}" data-cost="{{ product.cost_price }}">{{ product.name }} ({{ product.sku }}) - Qty: {{ product.quantity }}</option>
+        {% endfor %}
+      </select>
+      <input type="hidden" class="product-sku" name="items[][sku]">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Quantity</label>
+      <input type="number" class="form-control" name="items[][quantity]" min="1" required>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label">Unit Cost</label>
+      <input type="number" class="form-control unit-cost" name="items[][unit_cost]" step="0.01" min="0" required>
+    </div>
+    <div class="col-md-2">
+      <button type="button" class="btn btn-outline-danger btn-sm remove-item-btn">
+        <i class="bi bi-trash"></i>
+      </button>
+    </div>
+  </div>
+`;
+
+// Add this JavaScript handler for product selection
+document.getElementById('itemsContainer').addEventListener('change', function(e) {
+  if (e.target.classList.contains('product-select')) {
+    const select = e.target;
+    const selectedOption = select.options[select.selectedIndex];
+    const sku = selectedOption.value;
+    const cost = selectedOption.getAttribute('data-cost');
+
+    const row = select.closest('.item-row');
+    row.querySelector('.product-sku').value = sku;
+    row.querySelector('.unit-cost').value = cost || '';
+  }
+});
+
+// Add item button handler
+document.getElementById('addItemBtn').addEventListener('click', function() {
+  const container = document.getElementById('itemsContainer');
+  container.insertAdjacentHTML('beforeend', itemRowTemplate);
+});
+
+// Remove item button handler (delegated)
+document.getElementById('itemsContainer').addEventListener('click', function(e) {
+  if (e.target.classList.contains('remove-item-btn') || e.target.closest('.remove-item-btn')) {
+    e.target.closest('.item-row').remove();
+  }
+});
+
+// Form submission handler
+document.getElementById('movementForm').addEventListener('submit', function(e) {
+  e.preventDefault();
+
+  const form = this;
+  const csvInput = document.getElementById('csv_file');
+  const csvFilePresent = csvInput && csvInput.files && csvInput.files.length > 0;
+  const csvTabActive = document.getElementById('csv-tab').classList.contains('active');
+  const manualTabActive = document.getElementById('manual-tab').classList.contains('active');
+
+  // If CSV file is present or CSV tab is active (and file chosen), submit as multipart/form-data
+  if (csvFilePresent || csvTabActive) {
+    const formData = new FormData(form);
+
+    // For manual items that were dynamically added but not inside <form> or if we programmatically built items,
+    // ensure the inputs are inside the form (they are in this template) so FormData(form) will capture them.
+    // If you build items with JS, they must have name attributes (items[][sku], items[][quantity], items[][unit_cost]) — they do.
+
+    // Submit FormData without setting Content-Type (browser will add boundary)
+    fetch('{{ url_for("core.create_inventory_movement") }}', {
+      method: 'POST',
+      body: formData
+    })
+    .then(response => response.json())
+    .then(result => {
+      if (result.success) {
+        alert('Movement recorded successfully!');
+
+        if (result.download_url) {
+          window.open(result.download_url, '_blank');
+        }
+
+        // Update table
+        const tableBody = document.querySelector('#movementsTable tbody');
+        const newRow = document.createElement('tr');
+        newRow.innerHTML = `
+          <td>${result.movement.date}</td>
+          <td>${result.movement.type}</td>
+          <td>${result.movement.from}</td>
+          <td>${result.movement.to}</td>
+          <td>${result.movement.items} items</td>
+          <td>${result.movement.notes}</td>
+        `;
+        tableBody.insertBefore(newRow, tableBody.firstChild);
+
+        const modal = bootstrap.Modal.getInstance(document.getElementById('createMovementModal'));
+        modal.hide();
+        form.reset();
+        document.getElementById('itemsContainer').innerHTML = '';
+      } else {
+        alert('Error: ' + (result.error || JSON.stringify(result)));
+      }
+    })
+    .catch(error => {
+      console.error('Error:', error);
+      alert('An error occurred. Please try again.');
+    });
+
+    return;
+  }
+
+  // Otherwise, manual entry — collect items into JSON and send as application/json
+  const items = [];
+  const itemRows = document.querySelectorAll('.item-row');
+  itemRows.forEach(row => {
+    const skuField = row.querySelector('.product-sku');
+    const sku = skuField ? skuField.value : '';
+    const quantityField = row.querySelector('input[name*="quantity"]');
+    const unitCostField = row.querySelector('input[name*="unit_cost"]');
+    const quantity = quantityField ? quantityField.value : '';
+    const unit_cost = unitCostField ? unitCostField.value : '';
+    if (sku && quantity && unit_cost) {
+      items.push({ sku, quantity: parseInt(quantity), unit_cost: parseFloat(unit_cost) });
+    }
+  });
+
+  const payload = {
+    movement_type: document.getElementById('movement_type').value,
+    from_branch_id: document.getElementById('from_branch_id').value,
+    to_branch_id: document.getElementById('to_branch_id').value,
+    notes: document.getElementById('notes').value,
+    items: items
+  };
+
+  fetch('{{ url_for("core.create_inventory_movement") }}', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload)
+  })
+  .then(response => response.json())
+  .then(result => {
+    if (result.success) {
+      alert('Movement recorded successfully!');
+
+      if (result.download_url) {
+        window.open(result.download_url, '_blank');
+      }
+
+      // Update table
+      const tableBody = document.querySelector('#movementsTable tbody');
+      const newRow = document.createElement('tr');
+      newRow.innerHTML = `
+        <td>${result.movement.date}</td>
+        <td>${result.movement.type}</td>
+        <td>${result.movement.from}</td>
+        <td>${result.movement.to}</td>
+        <td>${result.movement.items} items</td>
+        <td>${result.movement.notes}</td>
+      `;
+      tableBody.insertBefore(newRow, tableBody.firstChild);
+
+      const modal = bootstrap.Modal.getInstance(document.getElementById('createMovementModal'));
+      modal.hide();
+      form.reset();
+      document.getElementById('itemsContainer').innerHTML = '';
+    } else {
+      alert('Error: ' + (result.error || JSON.stringify(result)));
+    }
+  })
+  .catch(error => {
+    console.error('Error:', error);
+    alert('An error occurred. Please try again.');
+  });
+});
+</script>
+{% endblock %}

@@ -1,0 +1,170 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid px-4 py-3">
+
+  <!-- Header -->
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <h2 class="mb-0">📦 Purchase Records</h2>
+    <a href="{{ url_for('core.purchase') }}" class="btn btn-primary shadow-sm">
+      ➕ New Purchase
+    </a>
+  </div>
+
+  <!-- Filters / Search -->
+  <div class="card mb-3 shadow-sm border-0">
+    <div class="card-body d-flex flex-wrap gap-3 align-items-center">
+      <div class="flex-grow-1">
+        <input type="text" id="searchInput" class="form-control" placeholder="🔍 Search by supplier or ID...">
+      </div>
+      <div>
+        <select id="sortSelect" class="form-select">
+          <option value="recent">Sort by: Most Recent</option>
+          <option value="oldest">Oldest First</option>
+          <option value="highest">Highest Total</option>
+          <option value="lowest">Lowest Total</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="card shadow-sm border-0">
+    <div class="table-responsive">
+      <table class="table align-middle table-hover mb-0" id="purchaseTable">
+        <thead class="table-light">
+          <tr>
+            <th>ID</th>
+            <th>Supplier</th>
+            <th>Total (₱)</th>
+            <th>VAT (₱)</th>
+            <th>Date</th>
+            <th>Status</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for p in purchases %}
+            <tr class="{{ 'table-secondary text-decoration-line-through' if p.voided_at else '' }}">
+              <td><strong>#{{ p.id }}</strong></td>
+              <td>{{ p.supplier }}</td>
+              <td>₱{{ "%.2f"|format(p.total) }}</td>
+              <td>₱{{ "%.2f"|format(p.vat) }}</td>
+              <td>{{ p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else '—' }}</td>
+              <td>
+                {% if p.voided_at %}
+                  <span class="badge bg-dark">VOIDED</span>
+                {% elif p.status == 'Canceled' %}
+                  <span class="badge bg-secondary">Canceled</span>
+                {% else %}
+                  <span class="badge bg-success">{{ p.status }}</span>
+                {% endif %}
+              </td>
+              <td>
+                <div class="btn-group btn-group-sm">
+                  <a href="{{ url_for('core.view_purchase', purchase_id=p.id) }}" 
+                     class="btn btn-outline-info">🔍 View</a>
+                     
+                  {% if not p.voided_at and p.status != 'Canceled' %}
+                    <button type="button" 
+                            class="btn btn-outline-danger" 
+                            data-bs-toggle="modal"
+                            data-bs-target="#voidModal"
+                            onclick="setVoidTarget('{{ url_for('void.void_purchase', purchase_id=p.id) }}', 'Purchase #{{ p.id }}')">
+                      <i class="bi bi-x-circle"></i> Void
+                    </button>
+                  {% endif %}
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7" class="text-center text-muted py-3">No purchases recorded yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Summary Footer -->
+  {% if purchases %}
+  <div class="card mt-4 shadow-sm border-0">
+    <div class="card-body text-end">
+      <h5 class="mb-0">
+        <strong>Total Purchases:</strong> ₱{{ "%.2f"|format(purchases|sum(attribute='total')) }}
+        &nbsp; | &nbsp;
+        <strong>Total VAT:</strong> ₱{{ "%.2f"|format(purchases|sum(attribute='vat')) }}
+      </h5>
+    </div>
+  </div>
+  {% endif %}
+</div>
+
+<!-- Void Confirmation Modal -->
+<div class="modal fade" id="voidModal" tabindex="-1">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form id="voidForm" method="POST">
+        <div class="modal-header bg-danger text-white">
+          <h5 class="modal-title">
+            <i class="bi bi-exclamation-triangle-fill me-2"></i>Void Purchase
+          </h5>
+          <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <div class="alert alert-warning">
+            <strong>Warning:</strong> This will remove inventory lots and reverse all accounting entries.
+          </div>
+          <p>You are about to void: <strong id="voidTargetName"></strong></p>
+          <div class="mb-3">
+            <label class="form-label"><strong>Void Reason *</strong></label>
+            <textarea name="void_reason" class="form-control" rows="3" placeholder="Enter the reason for voiding this purchase..." required></textarea>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-danger">
+            <i class="bi bi-x-circle me-1"></i> Void Purchase
+          </button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- Scripts -->
+<script>
+  function setVoidTarget(actionUrl, targetName) {
+    document.getElementById('voidForm').action = actionUrl;
+    document.getElementById('voidTargetName').textContent = targetName;
+  }
+
+  // 🔍 Search filter
+  document.getElementById("searchInput").addEventListener("keyup", function() {
+    let filter = this.value.toLowerCase();
+    document.querySelectorAll("#purchaseTable tbody tr").forEach(row => {
+      let text = row.innerText.toLowerCase();
+      row.style.display = text.includes(filter) ? "" : "none";
+    });
+  });
+
+  // ⬆️ Sort options
+  document.getElementById("sortSelect").addEventListener("change", function() {
+    let rows = Array.from(document.querySelectorAll("#purchaseTable tbody tr"));
+    let val = this.value;
+
+    rows.sort((a, b) => {
+      let totalA = parseFloat(a.cells[2].innerText.replace(/[₱,]/g, "")) || 0;
+      let totalB = parseFloat(b.cells[2].innerText.replace(/[₱,]/g, "")) || 0;
+      let dateA = new Date(a.cells[4].innerText);
+      let dateB = new Date(b.cells[4].innerText);
+
+      if (val === "recent") return dateB - dateA;
+      if (val === "oldest") return dateA - dateB;
+      if (val === "highest") return totalB - totalA;
+      if (val === "lowest") return totalA - totalB;
+    });
+
+    const tbody = document.querySelector("#purchaseTable tbody");
+    rows.forEach(r => tbody.appendChild(r));
+  });
+</script>
+{% endblock %}

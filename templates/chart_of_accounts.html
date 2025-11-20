@@ -1,0 +1,156 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container my-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-list-columns-reverse me-2"></i>Chart of Accounts</h2>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addAccountModal">
+            <i class="bi bi-plus-circle me-1"></i> Add New Account
+        </button>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Code</th>
+                        <th>Account Name</th>
+                        <th>Type</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for acc in accounts %}
+                    <tr>
+                        <td>{{ acc.code }}</td>
+                        <td>
+                            {{ acc.name }}
+                            {% if acc.name in system_accounts %}
+                                <span class="badge bg-info-subtle text-dark-emphasis ms-2" title="This is a required system account.">System</span>
+                            {% endif %}
+                        </td>
+                        <td><span class="badge bg-secondary">{{ acc.type }}</span></td>
+                        <td>
+                            <button class="btn btn-sm btn-outline-secondary" 
+                                    onclick="openEditModal(
+                                        '{{ acc.id }}', 
+                                        '{{ acc.code }}', 
+                                        '{{ acc.name }}', 
+                                        '{{ acc.type }}',
+                                        {{ (acc.name in system_accounts)|lower }} 
+                                    )">
+                                <i class="bi bi-pencil"></i> Edit
+                            </button>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="addAccountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form action="{{ url_for('accounts.add_account') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Add New Account</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Account Code</label>
+                        <input type="text" name="code" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Account Name</label>
+                        <input type="text" name="name" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Account Type</label>
+                        <select name="type" class="form-select" required>
+                            <option value="Asset">Asset</option>
+                            <option value="Liability">Liability</option>
+                            <option value="Equity">Equity</option>
+                            <option value="Revenue">Revenue</option>
+                            <option value="Expense">Expense</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary">Save Account</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="editAccountModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form id="editForm" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Edit Account</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Account Code</label>
+                        <input type="text" id="editCode" name="code" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Account Name</label>
+                        <input type="text" id="editName" name="name" class="form-control" required>
+                        <div id="editNameHelp" class="form-text text-danger" style="display: none;">
+                            The name of a critical system account cannot be changed.
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Account Type</label>
+                        <select id="editType" name="type" class="form-select" required>
+                            <option value="Asset">Asset</option>
+                            <option value="Liability">Liability</option>
+                            <option value="Equity">Equity</option>
+                            <option value="Revenue">Revenue</option>
+                            <option value="Expense">Expense</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary">Save Changes</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+// --- UPDATE THE FUNCTION SIGNATURE ---
+function openEditModal(id, code, name, type, isSystemAccount) {
+    const form = document.getElementById('editForm');
+    form.action = `/accounts/update/${id}`;
+    
+    document.getElementById('editCode').value = code;
+    document.getElementById('editType').value = type;
+    
+    // --- ADD THIS LOGIC ---
+    const nameField = document.getElementById('editName');
+    const nameHelp = document.getElementById('editNameHelp');
+    
+    nameField.value = name;
+    
+    // --- FIX: Change .disabled to .readOnly ---
+    // A readonly field's value IS submitted with the form.
+    nameField.readOnly = isSystemAccount;
+    
+    // Show/hide the helper text
+    nameHelp.style.display = isSystemAccount ? 'block' : 'none';
+    // --- END OF ADDED LOGIC ---
+    
+    new bootstrap.Modal(document.getElementById('editAccountModal')).show();
+}
+</script>
+{% endblock %}

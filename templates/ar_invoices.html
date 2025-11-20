@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container my-4">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-file-earmark-plus me-2"></i>Accounts Receivable Invoices</h2>
+        <button class="btn btn-success" data-bs-toggle="modal" data-bs-target="#newArInvoiceModal">
+            <i class="bi bi-plus-circle me-1"></i> New AR Invoice (Credit Sale)
+        </button>
+    </div>
+
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Date</th>
+                        <th>Customer</th>
+                        <th>Total</th>
+                        <th>Paid</th>
+                        <th>Balance</th>
+                        <th>Status</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in invoices %}
+                    {% set balance = inv.total - inv.paid %}
+                    <tr>
+                        <td>AR-{{ inv.id }}</td>
+                        <td>{{ inv.date.strftime('%Y-%m-%d') }}</td>
+                        <td>{{ inv.customer.name if inv.customer else 'N/A' }}</td>
+                        <td>{{ inv.total | money }}</td>
+                        <td>{{ inv.paid | money }}</td>
+                        <td>{{ balance | money }}</td>
+                        <td><span class="badge bg-{{ 'success' if inv.status == 'Paid' else ('warning text-dark' if inv.status == 'Partially Paid' else 'danger') }}">{{ inv.status }}</span></td>
+                        <td>
+                            {% if inv.status != 'Paid' %}
+                            <button class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#recordPaymentModal" 
+                                onclick="setPaymentDetails('AR', {{ inv.id }}, {{ balance }})">
+                                Collect
+                            </button>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr>
+                        <td colspan="8" class="text-center">No Accounts Receivable Invoices found.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="newArInvoiceModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form action="{{ url_for('ar_ap.ar_invoices') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Create AR Invoice (Credit Sale)</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Customer</label>
+                        <select name="customer_id" class="form-select" required>
+                            <option value="">Select Customer...</option>
+                            {% for cust in customers %}
+                            <option value="{{ cust.id }}">{{ cust.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Total Amount (Gross/Incl. VAT)</label>
+                        <input type="number" step="0.01" name="total" class="form-control" required>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">VAT Amount (e.g., 12% of Net)</label>
+                        <input type="number" step="0.01" name="vat" class="form-control" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-success">Save Invoice</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<div class="modal fade" id="recordPaymentModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form action="{{ url_for('ar_ap.record_payment') }}" method="POST">
+                <div class="modal-header">
+                    <h5 class="modal-title">Record Payment</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <input type="hidden" name="ref_type" id="paymentRefType">
+                    <input type="hidden" name="ref_id" id="paymentRefId">
+
+                    <div class="mb-3">
+                        <label class="form-label">Amount Paid</label>
+                        <input type="number" step="0.01" name="amount" id="paymentAmount" class="form-control" required>
+                        <div class="form-text">Max balance: <span id="maxBalance"></span></div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Payment Method</label>
+                        <select name="method" class="form-select" required>
+                            <option value="Cash">Cash</option>
+                            <option value="Bank">Bank Transfer/Check</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <button type="submit" class="btn btn-primary">Record Payment</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+    function setPaymentDetails(refType, refId, balance) {
+        document.getElementById('paymentRefType').value = refType;
+        document.getElementById('paymentRefId').value = refId;
+        document.getElementById('paymentAmount').value = balance.toFixed(2);
+        document.getElementById('paymentAmount').max = balance.toFixed(2);
+        document.getElementById('maxBalance').innerText = '{{ 0 | money }}'.replace('0.00', balance.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ','));
+    }
+</script>
+{% endblock %}

@@ -1,0 +1,322 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid my-4">
+    <!-- Header -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h2><i class="bi bi-arrow-down-up me-2"></i>Stock Adjustments</h2>
+        <div>
+            <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#adjustStockModal">
+                <i class="bi bi-plus-circle me-1"></i> New Adjustment
+            </button>
+            <a href="{{ url_for('core.inventory') }}" class="btn btn-outline-secondary">
+                <i class="bi bi-arrow-left"></i> Back to Inventory
+            </a>
+        </div>
+    </div>
+
+    <!-- Search & Filter Card -->
+    <div class="card mb-3 shadow-sm">
+        <div class="card-body">
+            <form method="GET" class="row g-3">
+                <div class="col-md-4">
+                    <label class="form-label">Search</label>
+                    <input type="text" name="search" class="form-control" 
+                           placeholder="Search by product name or reason..." 
+                           value="{{ request.args.get('search', '') }}">
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Status</label>
+                    <select name="status" class="form-select">
+                        <option value="">All</option>
+                        <option value="active" {{ 'selected' if request.args.get('status') == 'active' }}>Active</option>
+                        <option value="voided" {{ 'selected' if request.args.get('status') == 'voided' }}>Voided</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label">Date From</label>
+                    <input type="date" name="date_from" class="form-control" value="{{ request.args.get('date_from', '') }}">
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">&nbsp;</label>
+                    <button type="submit" class="btn btn-primary w-100">
+                        <i class="bi bi-search"></i> Filter
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Adjustments Table -->
+    <div class="card shadow-sm">
+        <div class="card-body">
+            <div class="table-responsive">
+                <table class="table table-hover table-sm">
+                    <thead class="table-light">
+                        <tr>
+                            <th style="width: 5%;">ID</th>
+                            <th style="width: 12%;">Date</th>
+                            <th style="width: 20%;">Product</th>
+                            <th style="width: 10%;" class="text-center">Qty Changed</th>
+                            <th style="width: 25%;">Reason</th>
+                            <th style="width: 10%;">User</th>
+                            <th style="width: 8%;">Status</th>
+                            <th style="width: 10%;">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for adj in adjustments %}
+                        <tr class="{{ 'table-secondary text-decoration-line-through' if adj.voided_at else '' }}">
+                            <td><strong>#{{ adj.id }}</strong></td>
+                            <td><small>{{ adj.created_at.strftime('%Y-%m-%d %H:%M') }}</small></td>
+                            <td>
+                                <strong>{{ adj.product.name }}</strong>
+                                <br><small class="text-muted">SKU: {{ adj.product.sku }}</small>
+                            </td>
+                            <td class="text-center">
+                                {% if adj.quantity_changed > 0 %}
+                                    <span class="badge bg-success fs-6">+{{ adj.quantity_changed }}</span>
+                                {% else %}
+                                    <span class="badge bg-danger fs-6">{{ adj.quantity_changed }}</span>
+                                {% endif %}
+                            </td>
+                            <td><small>{{ adj.reason }}</small></td>
+                            <td>
+                                <small>
+                                    {% if adj.user %}
+                                        {{ adj.user.username }}
+                                    {% else %}
+                                        <span class="text-muted">System</span>
+                                    {% endif %}
+                                </small>
+                            </td>
+                            <td>
+                                {% if adj.voided_at %}
+                                    <span class="badge bg-dark">VOIDED</span>
+                                {% else %}
+                                    <span class="badge bg-success">Active</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if not adj.voided_at %}
+                                    <button class="btn btn-sm btn-outline-danger" 
+                                            data-bs-toggle="modal" 
+                                            data-bs-target="#voidAdjustmentModal"
+                                            onclick="setVoidAdjustmentTarget('{{ url_for('void.void_stock_adjustment', adjustment_id=adj.id) }}', 'Adjustment #{{ adj.id }} - {{ adj.reason }}')">
+                                        <i class="bi bi-x-circle"></i> Void
+                                    </button>
+                                {% else %}
+                                    <button class="btn btn-sm btn-outline-secondary" 
+                                            data-bs-toggle="collapse" 
+                                            data-bs-target="#void-details-{{ adj.id }}"
+                                            title="View void details">
+                                        <i class="bi bi-info-circle"></i>
+                                    </button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% if adj.voided_at %}
+                        <tr id="void-details-{{ adj.id }}" class="collapse">
+                            <td colspan="8" class="bg-light">
+                                <div class="p-2">
+                                    <strong>Void Details:</strong><br>
+                                    <small>
+                                        <strong>Voided by:</strong> {{ adj.voided_by_user.username if adj.voided_by_user else 'System' }}<br>
+                                        <strong>Voided at:</strong> {{ adj.voided_at.strftime('%Y-%m-%d %H:%M') }}<br>
+                                        <strong>Reason:</strong> {{ adj.void_reason }}
+                                    </small>
+                                </div>
+                            </td>
+                        </tr>
+                        {% endif %}
+                        {% else %}
+                        <tr>
+                            <td colspan="8" class="text-center text-muted py-4">
+                                <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+                                No stock adjustments found.
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- New Stock Adjustment Modal -->
+<div class="modal fade" id="adjustStockModal" tabindex="-1">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content">
+            <form action="{{ url_for('core.adjust_stock') }}" method="POST">
+                <div class="modal-header bg-success text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-arrow-down-up me-2"></i>Create Stock Adjustment
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        <strong><i class="bi bi-info-circle me-2"></i>Note:</strong>
+                        Use <strong>positive numbers</strong> to increase stock (found items) or 
+                        <strong>negative numbers</strong> to decrease stock (losses, damages).
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Product *</strong></label>
+                        <select name="product_id" id="productSelectDropdown" class="form-select" required>
+                            <option value="">Select a product...</option>
+                            {% for p in all_active_products %}
+                            <option value="{{ p.id }}" data-current="{{ p.quantity }}">
+                                {{ p.sku }} - {{ p.name }} (Current: {{ p.quantity }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                        <small class="text-muted">Current stock: <span id="currentStockDisplay">—</span></small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Quantity Change *</strong></label>
+                        <input type="number" name="quantity" id="quantityInput" class="form-control" 
+                               placeholder="e.g., -5 for loss, +10 for found items" required>
+                        <small class="text-muted">
+                            New stock will be: <span id="newStockDisplay">—</span>
+                        </small>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Reason *</strong></label>
+                        <select class="form-select mb-2" id="reasonPreset" onchange="setReason(this.value)">
+                            <option value="">-- Select preset or type custom --</option>
+                            <option value="Physical count correction">Physical count correction</option>
+                            <option value="Damaged during inspection">Damaged during inspection</option>
+                            <option value="Spoilage/Expiry">Spoilage/Expiry</option>
+                            <option value="Customer return - defective">Customer return - defective</option>
+                            <option value="Found in warehouse">Found in warehouse</option>
+                            <option value="custom">Custom reason...</option>
+                        </select>
+                        <input type="text" name="reason" id="reasonInput" class="form-control" 
+                               placeholder="Enter adjustment reason" required>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-success">
+                        <i class="bi bi-save"></i> Save Adjustment
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Void Adjustment Modal -->
+<div class="modal fade" id="voidAdjustmentModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form id="voidAdjustmentForm" method="POST">
+                <div class="modal-header bg-danger text-white">
+                    <h5 class="modal-title">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>Void Stock Adjustment
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-warning">
+                        <strong>Warning:</strong> This will reverse the quantity adjustment and restore inventory.
+                    </div>
+                    <p>Adjustment: <strong id="voidAdjustmentTargetName"></strong></p>
+                    <div class="mb-3">
+                        <label class="form-label"><strong>Void Reason *</strong></label>
+                        <textarea name="void_reason" class="form-control" rows="3" placeholder="Enter reason for voiding this adjustment..." required></textarea>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+                    <button type="submit" class="btn btn-danger">
+                        <i class="bi bi-x-circle me-1"></i> Void Adjustment
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- Tom Select CSS/JS -->
+<link href="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/css/tom-select.bootstrap5.css" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/tom-select@2.3.1/dist/js/tom-select.complete.min.js"></script>
+
+<script>
+// Initialize Tom Select
+document.addEventListener('DOMContentLoaded', function() {
+    new TomSelect('#productSelectDropdown', {
+        create: false,
+        sortField: { field: "text", direction: "asc" },
+        placeholder: 'Select a product...',
+        onChange: function(value) {
+            updateStockDisplay();
+        }
+    });
+});
+
+// Update current stock display
+function updateStockDisplay() {
+    const select = document.getElementById('productSelectDropdown');
+    const option = select.options[select.selectedIndex];
+    const currentStock = option.getAttribute('data-current') || 0;
+    
+    document.getElementById('currentStockDisplay').textContent = currentStock;
+    calculateNewStock();
+}
+
+// Calculate new stock
+function calculateNewStock() {
+    const select = document.getElementById('productSelectDropdown');
+    const option = select.options[select.selectedIndex];
+    const currentStock = parseInt(option.getAttribute('data-current') || 0);
+    const change = parseInt(document.getElementById('quantityInput').value || 0);
+    const newStock = currentStock + change;
+    
+    document.getElementById('newStockDisplay').textContent = newStock;
+    
+    if (newStock < 0) {
+        document.getElementById('newStockDisplay').classList.add('text-danger');
+        document.getElementById('newStockDisplay').classList.remove('text-success');
+    } else {
+        document.getElementById('newStockDisplay').classList.add('text-success');
+        document.getElementById('newStockDisplay').classList.remove('text-danger');
+    }
+}
+
+// Update on quantity input
+document.addEventListener('DOMContentLoaded', function() {
+    document.getElementById('quantityInput').addEventListener('input', calculateNewStock);
+});
+
+// Set reason from preset
+function setReason(value) {
+    const reasonInput = document.getElementById('reasonInput');
+    if (value && value !== 'custom') {
+        reasonInput.value = value;
+    } else {
+        reasonInput.value = '';
+        reasonInput.focus();
+    }
+}
+
+// Void adjustment target
+function setVoidAdjustmentTarget(actionUrl, targetName) {
+    document.getElementById('voidAdjustmentForm').action = actionUrl;
+    document.getElementById('voidAdjustmentTargetName').textContent = targetName;
+}
+
+// Clear form on modal close
+document.getElementById('adjustStockModal').addEventListener('hidden.bs.modal', function () {
+    document.getElementById('quantityInput').value = '';
+    document.getElementById('reasonInput').value = '';
+    document.getElementById('reasonPreset').value = '';
+    document.getElementById('currentStockDisplay').textContent = '—';
+    document.getElementById('newStockDisplay').textContent = '—';
+});
+</script>
+
+{% endblock %}

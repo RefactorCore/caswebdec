@@ -1,0 +1,181 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="container-fluid">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h2><i class="bi bi-box-arrow-in-down me-2"></i>Receive Consignment Goods</h2>
+            <p class="text-muted">Record goods received on consignment from suppliers</p>
+        </div>
+        <a href="{{ url_for('consignment.list_received') }}" class="btn btn-outline-secondary">
+            <i class="bi bi-list me-1"></i> View All Consignments
+        </a>
+    </div>
+
+    <div class="card">
+        <div class="card-body">
+            <form method="POST" id="consignmentForm">
+                <div class="row mb-3">
+                    <div class="col-md-6">
+                        <label class="form-label">Supplier *</label>
+                        <select name="supplier_id" id="supplier_id" class="form-select" required>
+                            <option value="">-- Select Supplier --</option>
+                            {% for supplier in suppliers %}
+                            <option value="{{ supplier.id }}" data-commission="{{ supplier.default_commission_rate }}">
+                                {{ supplier.name }}
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Commission Rate (%) *</label>
+                        <input type="number" name="commission_rate" id="commission_rate" class="form-control" value="15" step="0.01" min="0" max="100" required>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label">Expected Return (Days)</label>
+                        <input type="number" name="expected_return_days" class="form-control" placeholder="Optional">
+                    </div>
+                </div>
+
+                <div class="mb-3">
+                    <label class="form-label">Notes</label>
+                    <textarea name="notes" class="form-control" rows="2" placeholder="Additional notes about this consignment..."></textarea>
+                </div>
+
+                <hr>
+
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h5>Consignment Items</h5>
+                    <button type="button" class="btn btn-success" onclick="addItem()">
+                        <i class="bi bi-plus-circle me-1"></i> Add Item
+                    </button>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="table table-bordered" id="itemsTable">
+                        <thead>
+                            <tr>
+                                <th style="width: 15%;">SKU *</th>
+                                <th style="width: 25%;">Product Name *</th>
+                                <th style="width: 20%;">Description</th>
+                                <th style="width: 10%;">Barcode</th>
+                                <th style="width: 10%;">Quantity *</th>
+                                <th style="width: 10%;">Retail Price *</th>
+                                <th style="width: 10%;">Total</th>
+                                <th style="width: 5%;"></th>
+                            </tr>
+                        </thead>
+                        <tbody id="itemsTableBody">
+                            <!-- Items will be added here -->
+                        </tbody>
+                        <tfoot>
+                            <tr class="table-light">
+                                <td colspan="4" class="text-end"><strong>TOTAL:</strong></td>
+                                <td><strong id="totalQty">0</strong></td>
+                                <td></td>
+                                <td><strong id="totalValue">₱0.00</strong></td>
+                                <td></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+
+                <input type="hidden" name="items_json" id="items_json">
+
+                <div class="d-flex justify-content-end gap-2 mt-4">
+                    <a href="{{ url_for('consignment.list_received') }}" class="btn btn-secondary">Cancel</a>
+                    <button type="submit" class="btn btn-primary">
+                        <i class="bi bi-check-circle me-1"></i> Receive Consignment
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+let itemCounter = 0;
+let items = [];
+
+// Auto-fill commission rate when supplier is selected
+document.getElementById('supplier_id').addEventListener('change', function() {
+    const selected = this.options[this.selectedIndex];
+    const commission = selected.getAttribute('data-commission');
+    if (commission) {
+        document.getElementById('commission_rate').value = commission;
+    }
+});
+
+function addItem() {
+    itemCounter++;
+    const tbody = document.getElementById('itemsTableBody');
+    const row = document.createElement('tr');
+    row.id = 'item_' + itemCounter;
+    row.innerHTML = `
+        <td><input type="text" class="form-control form-control-sm" id="sku_${itemCounter}" required></td>
+        <td><input type="text" class="form-control form-control-sm" id="name_${itemCounter}" required></td>
+        <td><input type="text" class="form-control form-control-sm" id="desc_${itemCounter}"></td>
+        <td><input type="text" class="form-control form-control-sm" id="barcode_${itemCounter}"></td>
+        <td><input type="number" class="form-control form-control-sm" id="qty_${itemCounter}" min="1" required onchange="updateTotals()"></td>
+        <td><input type="number" class="form-control form-control-sm" id="price_${itemCounter}" min="0" step="0.01" required onchange="updateTotals()"></td>
+        <td class="text-end"><span id="line_total_${itemCounter}">₱0.00</span></td>
+        <td><button type="button" class="btn btn-sm btn-danger" onclick="removeItem(${itemCounter})"><i class="bi bi-trash"></i></button></td>
+    `;
+    tbody.appendChild(row);
+}
+
+function removeItem(id) {
+    document.getElementById('item_' + id).remove();
+    updateTotals();
+}
+
+function updateTotals() {
+    let totalQty = 0;
+    let totalValue = 0;
+    
+    items = [];
+    
+    for (let i = 1; i <= itemCounter; i++) {
+        const row = document.getElementById('item_' + i);
+        if (!row) continue;
+        
+        const qty = parseFloat(document.getElementById('qty_' + i).value || 0);
+        const price = parseFloat(document.getElementById('price_' + i).value || 0);
+        const lineTotal = qty * price;
+        
+        document.getElementById('line_total_' + i).textContent = '₱' + lineTotal.toFixed(2);
+        
+        totalQty += qty;
+        totalValue += lineTotal;
+        
+        items.push({
+            sku: document.getElementById('sku_' + i).value,
+            name: document.getElementById('name_' + i).value,
+            description: document.getElementById('desc_' + i).value,
+            barcode: document.getElementById('barcode_' + i).value,
+            quantity: qty,
+            retail_price: price
+        });
+    }
+    
+    document.getElementById('totalQty').textContent = totalQty;
+    document.getElementById('totalValue').textContent = '₱' + totalValue.toFixed(2);
+}
+
+document.getElementById('consignmentForm').addEventListener('submit', function(e) {
+    updateTotals();
+    
+    if (items.length === 0) {
+        e.preventDefault();
+        alert('Please add at least one item to the consignment.');
+        return false;
+    }
+    
+    document.getElementById('items_json').value = JSON.stringify(items);
+});
+
+// Add first item on page load
+window.addEventListener('DOMContentLoaded', function() {
+    addItem();
+});
+</script>
+{% endblock %}

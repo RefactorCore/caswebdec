@@ -1,0 +1,101 @@
+{% extends 'base.html' %}
+{% block content %}
+
+<div class="container mt-4">
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <h2 class="fw-bold text-primary mb-0">📊 Balance Sheet</h2>
+        <a href="{{ url_for('reports.export_balance_sheet', end_date=end_date) }}" class="btn btn-success">
+            ⬇ Export CSV
+        </a>
+    </div>
+
+    <div class="card shadow-sm mb-3">
+      <div class="card-body">
+        <form method="GET" action="" class="row g-3 align-items-end">
+          <div class="col-md-4">
+            <label for="end_date" class="form-label">As of Date</label>
+            <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+          </div>
+          <div class="col-md-2">
+            <button type="submit" class="btn btn-primary w-100">Run Report</button>
+          </div>
+          <div class="col-md-2">
+            <a href="{{ request.path }}" class="btn btn-outline-secondary w-100">Clear</a>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="row">
+        <div class="col-md-6 mb-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-primary text-white fw-bold">ASSETS</div>
+                <div class="card-body">
+                    <table class="table table-sm table-borderless">
+                        <tbody>
+                            {% for name, balance in assets %}
+                            <tr>
+                                <td>{{ name }}</td>
+                                <td class="text-end">{{ balance | money }}</td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="fw-bold table-primary">
+                                <td>TOTAL ASSETS</td>
+                                <td class="text-end">{{ total_assets | money }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6 mb-4">
+            <div class="card shadow-sm h-100">
+                <div class="card-header bg-info text-dark fw-bold">LIABILITIES & EQUITY</div>
+                <div class="card-body">
+                    
+                    <h6 class="text-info">LIABILITIES</h6>
+                    <table class="table table-sm table-borderless">
+                        <tbody>
+                            {% for name, balance in liabilities %}
+                            <tr>
+                                <td>{{ name }}</td>
+                                <td class="text-end">{{ balance | money }}</td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="fw-bold">
+                                <td>Total Liabilities</td>
+                                <td class="text-end">{{ total_liabilities | money }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <h6 class="text-success mt-4">EQUITY</h6>
+                    <table class="table table-sm table-borderless">
+                        <tbody>
+                            {% for name, balance in equity %}
+                            <tr>
+                                <td>{{ name }}</td>
+                                <td class="text-end">{{ balance | money }}</td>
+                            </tr>
+                            {% endfor %}
+                            <tr class="fw-bold">
+                                <td>Total Equity</td>
+                                <td class="text-end">{{ total_equity | money }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                    
+                    <hr>
+                    <table class="table table-sm table-borderless">
+                        <tr class="fw-bold table-secondary">
+                            <td>TOTAL LIABILITIES & EQUITY</td>
+                            <td class="text-end">{{ (total_liabilities + total_equity) | money }}</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
