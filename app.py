@@ -1,3 +1,6 @@
+# https://github.com/your/repo/path/app.py (update in your repo)
+# Updated: register money and num filters inside create_app and removed invalid global assignment.
+
 # --- FIX: Import the necessary functions ---
 from flask import Flask, redirect, url_for, request
 # --- FIX: Import current_user ---
@@ -12,7 +15,9 @@ from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 from extensions import limiter
 from passlib.hash import pbkdf2_sha256
-from routes.void_transactions import void_bp 
+from routes.void_transactions import void_bp
+# keep local reference to a to_decimal implementation we can call (avoid circular imports at module level)
+from routes.ar_ap import to_decimal as _to_decimal
 
 def create_app():
     app = Flask(__name__, instance_relative_config=True)
@@ -34,14 +39,26 @@ def create_app():
     def load_user(user_id):
         return db.session.get(User, int(user_id))
 
-    # --- 'money' filter ---
-    @app.template_filter('money')
-    def money(value):
-        """Format a number as currency."""
+    # Register template filters inside create_app to avoid import-time issues
+    def money_filter(value):
+        """
+        Format a Decimal/number to a 2-decimal string WITHOUT currency symbol.
+        Templates should add the currency symbol where needed (e.g., ₱{{ value | money }}).
+        """
         try:
-            return f"₱{float(value):,.2f}"
-        except (ValueError, TypeError):
-            return "₱0.00"
+            return format(_to_decimal(value), '0.2f')
+        except Exception:
+            return "0.00"
+
+    def num_filter(value):
+        """Return a native float safe for use with tojson / JS numeric usage."""
+        try:
+            return float(_to_decimal(value))
+        except Exception:
+            return 0.0
+
+    app.jinja_env.filters['money'] = money_filter
+    app.jinja_env.filters['num'] = num_filter
 
     @app.before_request
     def check_setup():
@@ -132,7 +149,6 @@ def seed_essential_data(app):
             except Exception as e:
                 db.session.rollback()
                 print(f"❌ Error seeding COA: {e}")
-        
 
 if __name__ == '__main__':
     app = create_app()
