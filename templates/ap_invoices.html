@@ -73,16 +73,16 @@
                                         <button class="btn btn-outline-primary btn-sm" 
                                                 data-bs-toggle="modal" 
                                                 data-bs-target="#recordPaymentModal" 
-                                                onclick="setPaymentDetails('AP', {{ inv.id }}, {{ balance }})"
+                                                onclick="setPaymentDetails('AP', {{ inv.id }}, {{ (inv.total - inv.paid) | float }})"
                                                 title="Pay">
                                             <i class="bi bi-cash"></i>
                                         </button>
                                         {% endif %}
                                         
-                                        <button class="btn btn-outline-danger btn-sm" 
-                                                data-bs-toggle="modal" 
+                                        <button class="btn btn-outline-danger btn-sm"
+                                                data-bs-toggle="modal"
                                                 data-bs-target="#voidAPInvoiceModal"
-                                                onclick="setVoidAPInvoiceTarget('{{ url_for('void.void_ap_invoice', invoice_id=inv.id) }}', 'AP #{{ inv.id }} ({{ inv.invoice_number or 'N/A' }})', {{ inv.paid }})"
+                                                onclick="setVoidAPInvoiceTarget('{{ url_for('void.void_ap_invoice', invoice_id=inv.id) }}', 'AP #{{ inv.id }} ({{ inv.invoice_number or 'N/A' }})', {{ inv.paid | float }})"
                                                 title="Void">
                                             <i class="bi bi-x-circle"></i>
                                         </button>
@@ -244,7 +244,7 @@
 <div class="modal fade" id="recordPaymentModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
-            <form action="{{ url_for('ar_ap.record_payment') }}" method="POST">
+            <form action="{{ url_for('ar_ap.record_payment') }}" method="POST" data-normalize-decimals>
                 <div class="modal-header">
                     <h5 class="modal-title">Record Payment</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -354,13 +354,14 @@ function setVoidAPInvoiceTarget(actionUrl, targetName, paidAmount) {
     }
 }
 
+
 function setPaymentDetails(refType, refId, balance) {
     document.getElementById('paymentRefType').value = refType;
     document.getElementById('paymentRefId').value = refId;
-    document.getElementById('paymentAmount').value = balance.toFixed(2);
-    document.getElementById('paymentAmount').max = balance.toFixed(2);
-    document.getElementById('maxBalance').innerText = '₱' + balance.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    const bal = Number(balance) || 0;
+    document.getElementById('paymentAmount').value = bal.toFixed(2);
+    document.getElementById('paymentAmount').max = bal.toFixed(2);
+    document.getElementById('maxBalance').innerText = window.formatMoney(bal);
 }
 </script>
-
 {% endblock %}

@@ -43,7 +43,7 @@
       <div class="card shadow-sm border-0 h-100 {{ 'border-danger' if purchase.voided_at else '' }}">
         <div class="card-body text-center">
           <h6 class="text-muted">Total</h6>
-          <h3 class="text-success fw-bold">₱{{ "%.2f"|format(purchase.total) }}</h3>
+          <h3 class="text-success fw-bold">₱{{ purchase.total | money }}</h3>
         </div>
       </div>
     </div>
@@ -51,7 +51,7 @@
       <div class="card shadow-sm border-0 h-100">
         <div class="card-body text-center">
           <h6 class="text-muted">VAT</h6>
-          <h3 class="text-warning fw-bold">₱{{ "%.2f"|format(purchase.vat) }}</h3>
+          <h3 class="text-warning fw-bold">₱{{ purchase.vat | money }}</h3>
         </div>
       </div>
     </div>
@@ -60,7 +60,7 @@
         <div class="card-body text-center">
           <h6 class="text-muted">Net of VAT</h6>
           <h3 class="fw-bold">
-            ₱{{ "%.2f"|format(purchase.total - purchase.vat) }}
+            ₱{{ (purchase.total - purchase.vat) | money }}
           </h3>
         </div>
       </div>
@@ -89,23 +89,23 @@
               <td>{{ i.sku }}</td>
               <td>{{ i.product_name }}</td>
               <td class="text-center">{{ i.qty }}</td>
-              <td class="text-end">₱{{ "%.2f"|format(i.unit_cost) }}</td>
-              <td class="text-end">₱{{ "%.2f"|format(i.line_total) }}</td>
+              <td class="text-end">₱{{ i.unit_cost | money }}</td>
+              <td class="text-end">₱{{ i.line_total | money }}</td>
             </tr>
           {% endfor %}
         </tbody>
         <tfoot class="table-light">
           <tr>
             <th colspan="4" class="text-end">Subtotal:</th>
-            <th class="text-end">₱{{ "%.2f"|format(purchase.total - purchase.vat) }}</th>
+            <th class="text-end">₱{{ (purchase.total - purchase.vat) | money }}</th>
           </tr>
           <tr>
             <th colspan="4" class="text-end">VAT:</th>
-            <th class="text-end">₱{{ "%.2f"|format(purchase.vat) }}</th>
+            <th class="text-end">₱{{ purchase.vat | money }}</th>
           </tr>
           <tr>
             <th colspan="4" class="text-end fw-bold">Total:</th>
-            <th class="text-end fw-bold text-success">₱{{ "%.2f"|format(purchase.total) }}</th>
+            <th class="text-end fw-bold text-success">₱{{ purchase.total | money }}</th>
           </tr>
         </tfoot>
       </table>

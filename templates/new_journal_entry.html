@@ -83,10 +83,11 @@
             </select>
         </td>
         <td>
-            <input type="number" class="form-control debit-input" name="debit[]" placeholder="0.00" min="0" step="0.01">
+            <!-- use inputmode and step to allow decimal typing and ensure the value posted is a simple decimal string -->
+            <input type="number" inputmode="decimal" class="form-control debit-input" name="debit[]" placeholder="0.00" min="0" step="0.01">
         </td>
         <td>
-            <input type="number" class="form-control credit-input" name="credit[]" placeholder="0.00" min="0" step="0.01">
+            <input type="number" inputmode="decimal" class="form-control credit-input" name="credit[]" placeholder="0.00" min="0" step="0.01">
         </td>
         <td class="text-center">
             <button type="button" class="btn btn-danger btn-sm remove-row-btn">
@@ -95,7 +96,6 @@
         </td>
     </tr>
 </template>
-
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
@@ -110,10 +110,23 @@ document.addEventListener('DOMContentLoaded', function() {
     const balanceStatusEl = document.getElementById('balance-status');
     const moneyFormat = new Intl.NumberFormat('en-PH', { style: 'currency', currency: 'PHP' });
 
+    function roundTo2(n) {
+        return Math.round((Number(n) + Number.EPSILON) * 100) / 100;
+    }
+
     // Function to add a new row
     function addRow() {
         const clone = template.content.cloneNode(true);
         tableBody.appendChild(clone);
+    }
+
+    // Function to normalize an input value to a number (0 if empty/invalid)
+    function toNumberInputValue(el) {
+        if (!el) return 0;
+        const v = el.value;
+        if (v === '' || v === null) return 0;
+        const n = Number(v);
+        return isFinite(n) ? n : 0;
     }
 
     // Function to update totals and check balance
@@ -122,16 +135,20 @@ document.addEventListener('DOMContentLoaded', function() {
         let totalCredit = 0;
 
         tableBody.querySelectorAll('tr').forEach(row => {
-            const debit = parseFloat(row.querySelector('.debit-input').value || 0);
-            const credit = parseFloat(row.querySelector('.credit-input').value || 0);
+            const debit = toNumberInputValue(row.querySelector('.debit-input'));
+            const credit = toNumberInputValue(row.querySelector('.credit-input'));
             totalDebit += debit;
             totalCredit += credit;
         });
 
+        // Round to 2 decimals for display and comparison
+        totalDebit = roundTo2(totalDebit);
+        totalCredit = roundTo2(totalCredit);
+
         totalDebitEl.value = moneyFormat.format(totalDebit);
         totalCreditEl.value = moneyFormat.format(totalCredit);
 
-        // Check if balanced
+        // Check if balanced (both rounded to two decimals and > 0)
         if (totalDebit.toFixed(2) === totalCredit.toFixed(2) && totalDebit > 0) {
             balanceStatusEl.innerHTML = '<i class="bi bi-check-circle-fill text-success" title="Balanced"></i>';
             saveBtn.disabled = false;
@@ -154,17 +171,17 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Handle input changes to update totals
+    // Handle input changes to update totals and prevent simultaneous debit/credit entries
     tableBody.addEventListener('input', function(e) {
         if (e.target.classList.contains('debit-input') || e.target.classList.contains('credit-input')) {
             const row = e.target.closest('tr');
             const debitInput = row.querySelector('.debit-input');
             const creditInput = row.querySelector('.credit-input');
 
-            // Prevent simultaneous debit and credit entries
-            if (e.target.classList.contains('debit-input') && parseFloat(e.target.value) > 0) {
+            // If user enters a debit, clear credit and vice versa
+            if (e.target.classList.contains('debit-input') && toNumberInputValue(e.target) > 0) {
                 creditInput.value = '';
-            } else if (e.target.classList.contains('credit-input') && parseFloat(e.target.value) > 0) {
+            } else if (e.target.classList.contains('credit-input') && toNumberInputValue(e.target) > 0) {
                 debitInput.value = '';
             }
             
@@ -172,12 +189,35 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     });
 
-    // Form submission validation
+    // Before submitting, normalize numeric inputs to fixed 2-decimal strings to match backend Decimal parsing
     form.addEventListener('submit', function(e) {
+        // if unbalanced, block submit (extra safety)
         if (saveBtn.disabled) {
             e.preventDefault();
             alert('Cannot save an unbalanced or empty entry. Please check your totals.');
+            return;
         }
+
+        // Normalize inputs: ensure each debit[] and credit[] is set to a two-decimal numeric string or empty
+        tableBody.querySelectorAll('tr').forEach(row => {
+            const debitInput = row.querySelector('.debit-input');
+            const creditInput = row.querySelector('.credit-input');
+
+            if (toNumberInputValue(debitInput) > 0) {
+                debitInput.value = roundTo2(toNumberInputValue(debitInput)).toFixed(2);
+                creditInput.value = '';
+            } else {
+                debitInput.value = '';
+            }
+
+            if (toNumberInputValue(creditInput) > 0) {
+                creditInput.value = roundTo2(toNumberInputValue(creditInput)).toFixed(2);
+                debitInput.value = '';
+            } else {
+                creditInput.value = '';
+            }
+        });
+        // allow submit to continue
     });
 
     // Add initial rows and update totals on load

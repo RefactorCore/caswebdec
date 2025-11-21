@@ -49,8 +49,8 @@
           <tbody>
             {% for je in journals %}
             {% set entries = je.entries() %}
-            {% set total_debit = entries | sum(attribute='debit') %}
-            {% set total_credit = entries | sum(attribute='credit') %}
+            {% set total_debit = entries | map(attribute='debit') | map('num') | sum %}
+            {% set total_credit = entries | map(attribute='credit') | map('num') | sum %}
             <!-- ✅ UPDATED: Added voided styling -->
             <tr class="{{ 'table-secondary text-decoration-line-through' if je.voided_at else '' }}">
               <td><strong>#{{ je.id }}</strong></td>
@@ -61,8 +61,8 @@
                   <span class="badge bg-warning text-dark ms-1">Reversing Entry</span>
                 {% endif %}
               </td>
-              <td class="text-end text-success">₱{{ "%.2f"|format(total_debit) }}</td>
-              <td class="text-end text-danger">₱{{ "%.2f"|format(total_credit) }}</td>
+              <td class="text-end text-success">₱{{ total_debit | money }}</td>
+              <td class="text-end text-danger">₱{{ total_credit | money }}</td>
               <!-- ✅ UPDATED: Added voided status badge -->
               <td>
                 {% if je.voided_at %}
@@ -120,11 +120,11 @@
                         <tr>
                           <td>{{ line.account_code }}</td>
                           <td>{{ accounts_map.get(line.account_code, line.account_code) }}</td>
-                          <td class="text-end {{ 'text-success fw-bold' if line.debit > 0 else '' }}">
-                            {{ ('₱%.2f' | format(line.debit)) if line.debit > 0 else '—' }}
+                          <td class="text-end {{ 'text-success fw-bold' if line.debit | num > 0 else '' }}">
+                            {{ ('₱' ~ (line.debit | money)) if line.debit | num > 0 else '—' }}
                           </td>
-                          <td class="text-end {{ 'text-danger fw-bold' if line.credit > 0 else '' }}">
-                            {{ ('₱%.2f' | format(line.credit)) if line.credit > 0 else '—' }}
+                          <td class="text-end {{ 'text-danger fw-bold' if line.credit | num > 0 else '' }}">
+                            {{ ('₱' ~ (line.credit | money)) if line.credit | num > 0 else '—' }}
                           </td>
                         </tr>
                         {% endfor %}
@@ -132,8 +132,8 @@
                       <tfoot class="table-light">
                         <tr>
                           <th colspan="2" class="text-end">Totals:</th>
-                          <th class="text-end text-success">₱{{ "%.2f"|format(total_debit) }}</th>
-                          <th class="text-end text-danger">₱{{ "%.2f"|format(total_credit) }}</th>
+                          <th class="text-end text-success">₱{{ total_debit | money }}</th>
+                          <th class="text-end text-danger">₱{{ total_credit | money }}</th>
                         </tr>
                       </tfoot>
                     </table>

@@ -167,7 +167,7 @@ const itemRowTemplate = `
       <select class="form-select product-select" required>
         <option value="">Select Product</option>
         {% for product in all_active_products %}
-        <option value="{{ product.sku }}" data-cost="{{ product.cost_price }}">{{ product.name }} ({{ product.sku }}) - Qty: {{ product.quantity }}</option>
+        <option value="{{ product.sku }}" data-cost="{{ (product.cost_price | float) | tojson }}">{{ product.name }} ({{ product.sku }}) - Qty: {{ product.quantity }}</option>
         {% endfor %}
       </select>
       <input type="hidden" class="product-sku" name="items[][sku]">

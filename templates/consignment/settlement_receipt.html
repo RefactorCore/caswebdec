@@ -63,7 +63,7 @@
                             </tr>
                             <tr>
                                 <td><strong>Total Retail Value:</strong></td>
-                                <td>₱{{ "%.2f"|format(consignment.total_value) }}</td>
+                                <td>₱{{ consignment.total_value | money }}</td>
                             </tr>
                         </table>
                     </div>
@@ -113,7 +113,7 @@
                                     {{ item.quantity_damaged }}
                                     {% endif %}
                                 </td>
-                                <td class="text-end">₱{{ "%.2f"|format(item.retail_price) }}</td>
+                                <td class="text-end">₱{{ item.retail_price | money }}</td>
                             </tr>
                             {% endfor %}
                         </tbody>
@@ -138,28 +138,26 @@
                     <div class="col-md-6 offset-md-6">
                         <table class="table table-sm">
                             <tr>
-                                <td>Total Sold ({{ total_sold }} units):</td>
-                                <td class="text-end">₱{{ "%.2f"|format(total_sold_value) }}</td>
-                            </tr>
+                                <td>Total Sold ({{ total_sold }} units):</td> <td class="text-end">₱{{ total_sold_value | money }}</td> </tr>
                             <tr class="table-success">
                                 <td>Your Commission ({{ consignment.commission_rate }}%):</td>
-                                <td class="text-end">-₱{{ "%.2f"|format(commission_earned) }}</td>
+                                <td class="text-end">-₱{{ commission_earned | money }}</td>
                             </tr>
                             <tr class="table-warning">
                                 <td><strong>Amount Due to Supplier:</strong></td>
-                                <td class="text-end"><strong>₱{{ "%.2f"|format(amount_due_total) }}</strong></td>
+                                <td class="text-end"><strong>₱{{ amount_due_total | money }}</strong></td>
                             </tr>
                             <tr>
                                 <td colspan="2"><hr></td>
                             </tr>
                             <tr>
                                 <td><strong>Total Paid:</strong></td>
-                                <td class="text-end"><strong>₱{{ "%.2f"|format(total_paid) }}</strong></td>
+                                <td class="text-end"><strong>₱{{ total_paid | money }}</strong></td>
                             </tr>
                             {% if total_paid < amount_due_total %}
                             <tr class="table-danger">
                                 <td><strong>Balance Remaining:</strong></td>
-                                <td class="text-end"><strong>₱{{ "%.2f"|format(amount_due_total - total_paid) }}</strong></td>
+                                <td class="text-end"><strong>₱{{ (amount_due_total - total_paid) | money }}</strong></td>
                             </tr>
                             {% else %}
                             <tr class="table-success">
@@ -189,7 +187,7 @@
                         {% for r in all_remittances %}
                         <tr {% if r.id == remittance.id %}class="table-info"{% endif %}>
                             <td>{{ r.date_paid.strftime('%Y-%m-%d %H:%M') }}</td>
-                            <td>₱{{ "%.2f"|format(r.amount_paid) }}</td>
+                            <td>₱{{ r.amount_paid | money }}</td>
                             <td>{{ r.payment_method or 'N/A' }}</td>
                             <td>{{ r.notes or '-' }}</td>
                         </tr>

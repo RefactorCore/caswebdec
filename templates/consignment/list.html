@@ -66,7 +66,7 @@
                             <td>{{ cons.supplier.name }}</td>
                             <td>{{ cons.date_received.strftime('%Y-%m-%d %H:%M') }}</td>
                             <td>{{ cons.total_items }}</td>
-                            <td>₱{{ "%.2f"|format(cons.total_value) }}</td>
+                            <td>₱{{ cons.total_value | money }}</td>
                             <td>{{ cons.commission_rate }}%</td>
                             <td>
                                 {% if cons.status == 'Active' %}
@@ -155,7 +155,7 @@
             <div class="card text-white bg-info">
                 <div class="card-body">
                     <h6 class="card-title">Total Value</h6>
-                    <h3>₱{{ "%.2f"|format(consignments|sum(attribute='total_value')) }}</h3>
+                    <h3>₱{{ (consignments|sum(attribute='total_value')) | money }}</h3>
                 </div>
             </div>
         </div>

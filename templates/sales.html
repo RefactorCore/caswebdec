@@ -31,7 +31,7 @@
     <div class="card text-white bg-primary">
       <div class="card-body">
         <h6 class="card-title">Total Sales</h6>
-        <h4>₱{{ "%.2f"|format(summary.total_sales) }}</h4>
+        <h4>₱{{ summary.total_sales | money }}</h4>
         <small>{{ summary.count }} transactions</small>
       </div>
     </div>
@@ -58,8 +58,8 @@
     <div class="card text-white bg-warning">
       <div class="card-body">
         <h6 class="card-title">Total VAT</h6>
-        <h4>₱{{ "%.2f"|format(summary.total_vat) }}</h4>
-        <small>Discounts: ₱{{ "%.2f"|format(summary.total_discount) }}</small>
+        <h4>₱{{ summary.total_vat | money }}</h4>
+        <small>Discounts: ₱{{ summary.total_discount | money }}</small>
       </div>
     </div>
   </div>
@@ -108,27 +108,27 @@
             <td>{{ s.customer_name or '—' }}</td>
             
             <!-- Total -->
-            <td><strong>₱{{ "%.2f"|format(s.total) }}</strong></td>
+            <td><strong>₱{{ s.total | money }}</strong></td>
             
             <!-- Paid Amount -->
-            <td class="text-success">₱{{ "%.2f"|format(s.paid) }}</td>
+            <td class="text-success">₱{{ s.paid | money }}</td>
             
             <!-- Balance -->
             <td>
               {% if s.balance > 0 %}
-              <span class="text-danger fw-bold">₱{{ "%.2f"|format(s.balance) }}</span>
+              <span class="text-danger fw-bold">₱{{ s.balance | money }}</span>
               {% else %}
               <span class="text-muted">—</span>
               {% endif %}
             </td>
             
             <!-- VAT -->
-            <td>₱{{ "%.2f"|format(s.vat) }}</td>
+            <td>₱{{ s.vat | money }}</td>
             
             <!-- Discount -->
             <td>
               {% if s.discount_value > 0 %}
-              <span class="text-warning">₱{{ "%.2f"|format(s.discount_value) }}</span>
+              <span class="text-warning">₱{{ s.discount_value | money }}</span>
               {% else %}
               —
               {% endif %}

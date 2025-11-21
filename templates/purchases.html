@@ -47,8 +47,8 @@
             <tr class="{{ 'table-secondary text-decoration-line-through' if p.voided_at else '' }}">
               <td><strong>#{{ p.id }}</strong></td>
               <td>{{ p.supplier }}</td>
-              <td>₱{{ "%.2f"|format(p.total) }}</td>
-              <td>₱{{ "%.2f"|format(p.vat) }}</td>
+              <td>₱{{ p.total | money }}</td>
+              <td>₱{{ p.vat | money }}</td>
               <td>{{ p.created_at.strftime("%Y-%m-%d %H:%M") if p.created_at else '—' }}</td>
               <td>
                 {% if p.voided_at %}
@@ -89,9 +89,9 @@
   <div class="card mt-4 shadow-sm border-0">
     <div class="card-body text-end">
       <h5 class="mb-0">
-        <strong>Total Purchases:</strong> ₱{{ "%.2f"|format(purchases|sum(attribute='total')) }}
+        <strong>Total Purchases:</strong> ₱{{ (purchases|sum(attribute='total')) | money }}
         &nbsp; | &nbsp;
-        <strong>Total VAT:</strong> ₱{{ "%.2f"|format(purchases|sum(attribute='vat')) }}
+        <strong>Total VAT:</strong> ₱{{ (purchases|sum(attribute='vat')) | money }}
       </h5>
     </div>
   </div>

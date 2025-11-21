@@ -28,10 +28,10 @@
         <p><strong>Date:</strong> {{ sale.created_at.strftime("%Y-%m-%d %H:%M") if sale.created_at else '—' }}</p>
       </div>
       <div class="col-md-6 text-md-end">
-        <p><strong>Total (incl. VAT):</strong> ₱{{ "%.2f"|format(sale.total) }}</p>
-        <p><strong>VAT (12%):</strong> ₱{{ "%.2f"|format(sale.vat) }}</p>
+        <p><strong>Total (incl. VAT):</strong> ₱{{ sale.total | money }}</p>
+        <p><strong>VAT (12%):</strong> ₱{{ sale.vat | money }}</p>
         {% if sale.discount_value and sale.discount_value > 0 %}
-        <p><strong>Discount:</strong> ₱{{ "%.2f"|format(sale.discount_value) }}</p>
+        <p><strong>Discount:</strong> ₱{{ sale.discount_value | money }}</p>
         {% endif %}
       </div>
     </div>
@@ -54,8 +54,8 @@
           <td>{{ i.sku }}</td>
           <td>{{ i.product_name }}</td>
           <td>{{ i.qty }}</td>
-          <td>₱{{ "%.2f"|format(i.unit_price) }}</td>
-          <td>₱{{ "%.2f"|format(i.line_total) }}</td>
+          <td>₱{{ i.unit_price | money }}</td>
+          <td>₱{{ i.line_total | money }}</td>
         </tr>
       {% else %}
         <tr><td colspan="5" class="text-center">No sale items found.</td></tr>

@@ -47,8 +47,8 @@
                         <td>{{ lot.created_at.strftime('%Y-%m-%d %H:%M') }}</td>
                         <td>{{ lot.age_days }} days</td>
                         <td>{{ lot.quantity }}</td>
-                        <td>₱{{ "%.2f"|format(lot.unit_cost) }}</td>
-                        <td>₱{{ "%.2f"|format(lot.total_value) }}</td>
+                        <td>₱{{ lot.unit_cost | money }}</td>
+                        <td>₱{{ lot.total_value | money }}</td>
                         <td>
                             {% if lot.is_opening_balance %}
                                 <span class="badge bg-info">Opening Balance</span>
@@ -71,8 +71,8 @@
                     <tr class="table-light fw-bold">
                         <td colspan="3">TOTAL</td>
                         <td>{{ total_qty }}</td>
-                        <td>Avg: ₱{{ "%.2f"|format(avg_cost) }}</td>
-                        <td>₱{{ "%.2f"|format(total_value) }}</td>
+                        <td>Avg: ₱{{ avg_cost | money }}</td>
+                        <td>₱{{ total_value | money }}</td>
                         <td></td>
                     </tr>
                 </tfoot>

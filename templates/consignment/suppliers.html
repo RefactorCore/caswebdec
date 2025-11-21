@@ -63,7 +63,7 @@
                                 {% endif %}
                             </td>
                             <td>
-                                <button class="btn btn-sm btn-outline-primary" onclick="editSupplier({{ supplier.id }}, '{{ supplier.name }}', '{{ supplier.business_type }}', '{{ supplier.tin }}', '{{ supplier.address }}', '{{ supplier.contact_person }}', '{{ supplier.phone }}', '{{ supplier.email }}', {{ supplier.default_commission_rate }}, {{ supplier.payment_terms_days }}, '{{ supplier.notes }}')">
+                                <button class="btn btn-sm btn-outline-primary" onclick="editSupplier({{ supplier.id }}, '{{ supplier.name }}', '{{ supplier.business_type }}', '{{ supplier.tin }}', '{{ supplier.address }}', '{{ supplier.contact_person }}', '{{ supplier.phone }}', '{{ supplier.email }}', {{ supplier.default_commission_rate | float }}, {{ supplier.payment_terms_days | int }}, '{{ supplier.notes }}')">
                                     <i class="bi bi-pencil"></i>
                                 </button>
                                 <form method="POST" action="{{ url_for('consignment.toggle_supplier', supplier_id=supplier.id) }}" style="display:inline;">
@@ -118,7 +118,7 @@
                 <h5 class="modal-title">Add Consignment Supplier</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="{{ url_for('consignment.add_supplier') }}">
+            <form method="POST" action="{{ url_for('consignment.add_supplier') }}" data-normalize-decimals>
                 <div class="modal-body">
                     <div class="row">
                         <div class="col-md-6 mb-3">
@@ -188,7 +188,7 @@
                 <h5 class="modal-title">Edit Supplier</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" id="editSupplierForm">
+            <form method="POST" id="editSupplierForm" data-normalize-decimals>
                 <div class="modal-body">
                     <div class="row">
                         <div class="col-md-6 mb-3">

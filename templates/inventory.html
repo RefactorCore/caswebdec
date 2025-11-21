@@ -79,8 +79,8 @@
             <tr class="{% if not p.is_active %}disabled-row{% elif p.quantity <= 5 %}low-stock{% endif %}">
               <td>{{ p.sku }}</td>
               <td>{{ p.name }}</td>
-              <td>₱{{ "%.2f"|format(p.sale_price) }}</td>
-              <td>₱{{ "%.2f"|format(p.cost_price) }}</td>
+              <td>₱{{ p.sale_price | money }}</td>
+              <td>₱{{ p.cost_price | money }}</td>
               <td>{{ p.quantity }}</td>
               <td>
                 {% if not p.is_active %}
@@ -101,7 +101,7 @@
                     <i class="bi bi-card-list"></i>
                 </a>
                 <button class="btn btn-sm btn-outline-secondary"
-                          onclick='editProduct({{ p.sku|tojson }}, {{ p.name|tojson }}, {{ p.sale_price }}, {{ p.cost_price }})'>
+                        onclick='editProduct({{ p.sku|tojson }}, {{ p.name|tojson }}, {{ (p.sale_price|float) | tojson }}, {{ (p.cost_price|float) | tojson }})'>
                   <i class="bi bi-pencil"></i>
                 </button>
                 

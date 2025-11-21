@@ -93,24 +93,24 @@
                     <table class="table table-sm">
                         <tr>
                             <td>Total Retail Value:</td>
-                            <td class="text-end"><strong>₱{{ "%.2f"|format(consignment.total_value) }}</strong></td>
+                            <td class="text-end"><strong>₱{{ consignment.total_value | money }}</strong></td>
                         </tr>
                         <tr>
                             <td>Total Sold:</td>
-                            <td class="text-end">₱{{ "%.2f"|format(consignment.get_total_sold_value()) }}</td>
+                            <td class="text-end">₱{{ consignment.get_total_sold_value() | money }}</td>
                         </tr>
                         <tr class="table-success">
                             <td><strong>Commission Earned:</strong></td>
-                            <td class="text-end"><strong>₱{{ "%.2f"|format(consignment.get_commission_earned()) }}</strong></td>
+                            <td class="text-end"><strong>₱{{ consignment.get_commission_earned() | money }}</strong></td>
                         </tr>
                         <tr class="table-warning">
                             <td><strong>Due to Supplier:</strong></td>
-                            <td class="text-end"><strong>₱{{ "%.2f"|format(consignment.get_amount_due_to_supplier()) }}</strong></td>
+                            <td class="text-end"><strong>₱{{ consignment.get_amount_due_to_supplier() | money }}</strong></td>
                         </tr>
                         <tr>
                             <td>Total Paid:</td>
                             <td class="text-end">
-                                ₱{{ "%.2f"|format(total_paid) }}
+                                ₱{{ total_paid | money }}
                             </td>
                         </tr>
                     </table>
@@ -179,8 +179,8 @@
                             <td class="text-center">
                                 <strong>{{ item.quantity_available }}</strong>
                             </td>
-                            <td class="text-end">₱{{ "%.2f"|format(item.retail_price) }}</td>
-                            <td class="text-end">₱{{ "%.2f"|format(item.quantity_received * item.retail_price) }}</td>
+                            <td class="text-end">₱{{ item.retail_price | money }}</td>
+                            <td class="text-end">₱{{ (item.quantity_received * item.retail_price) | money }}</td>
                             <td>
                                 {% if item.is_active %}
                                     <span class="badge bg-success">Active</span>
@@ -272,7 +272,7 @@
                 <h5 class="modal-title">Settlement: Return Items & Remit Payment</h5>
                 <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form method="POST" action="{{ url_for('consignment.remit_payment', consignment_id=consignment.id) }}">
+            <form method="POST" action="{{ url_for('consignment.remit_payment', consignment_id=consignment.id) }}" data-normalize-decimals>
                 <div class="modal-body">
                     <p>Complete the consignment by returning unsold items and paying the supplier for sold items.</p>
                     
@@ -318,25 +318,25 @@
                                     <table class="table table-sm mb-0">
                                         <tr>
                                             <td>Total Sold:</td>
-                                            <td class="text-end">₱{{ "%.2f"|format(consignment.get_total_sold_value()) }}</td>
+                                            <td class="text-end"> ₱{{ consignment.get_total_sold_value() | money }}</td>
                                         </tr>
                                         <tr>
                                             <td>Your Commission ({{ consignment.commission_rate }}%):</td>
                                             <td class="text-end text-success">
-                                                -₱{{ "%.2f"|format(consignment.get_commission_earned()) }}
+                                                -₱{{ consignment.get_commission_earned() | money }}
                                             </td>
                                         </tr>
                                         <tr class="table-light">
                                             <td><strong>Amount Due:</strong></td>
-                                            <td class="text-end"><strong>₱{{ "%.2f"|format(amount_due) }}</strong></td>
+                                            <td class="text-end"><strong>₱{{ amount_due | money }}</strong></td>
                                         </tr>
                                         <tr>
                                             <td>Already Paid:</td>
-                                            <td class="text-end">₱{{ "%.2f"|format(total_paid) }}</td>
+                                            <td class="text-end">₱{{ total_paid | money }}</td>
                                         </tr>
                                         <tr class="table-warning">
                                             <td><strong>Remaining:</strong></td>
-                                            <td class="text-end"><strong>₱{{ "%.2f"|format(remaining_due) }}</strong></td>
+                                            <td class="text-end"><strong>₱{{ remaining_due | money }}</strong></td>
                                         </tr>
                                     </table>
                                 </div>
@@ -353,7 +353,7 @@
                             <div class="mb-3">
                                 <label class="form-label">Amount Paid *</label>
                                 <input type="number" name="amount_paid" class="form-control" 
-                                       value="{{ "%.2f"|format(remaining_due) }}" 
+                                       value="{{ remaining_due | money }}" 
                                        step="0.01" min="0.01" required>
                             </div>
                         </div>

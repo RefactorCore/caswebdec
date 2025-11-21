@@ -220,12 +220,12 @@
 
       <div id="productGrid" class="product-grid">
         {% for p in products %}
-        <div class="product-card" 
+        <div class="product-card"
              data-sku="{{ p.sku }}" 
              data-name="{{ p.name }}" 
-             data-price="{{ p.price }}" 
+             data-price="{{ p.price | tojson }}"
              data-stock="{{ p.quantity }}"
-             data-is-consignment="{{ p.is_consignment|lower }}"
+             data-is-consignment="{{ p.is_consignment | tojson }}"
              data-consignment-id="{{ p.consignment_id if p.is_consignment else '' }}"
              data-item-id="{{ p.id }}">
           <div class="name">{{ p.name }}</div>
@@ -239,7 +239,7 @@
           {% endif %}
           <div class="price-badge">
             <div class="badge-price" style="{% if p.is_consignment %}background: linear-gradient(180deg, #f39c12, #e67e22);{% endif %}">
-              ₱{{ "%.2f"|format(p.price) }}
+              ₱{{ p.price | money }}
             </div>
             <div class="product-quantity">Stock: {{ p.quantity }}</div>
           </div>
@@ -495,7 +495,7 @@ document.addEventListener("DOMContentLoaded", function() {
     let discountedGross = subtotal;
     
     // VAT_RATE from server config
-    const VAT_RATE = {{ (config.VAT_RATE) }}; 
+    const VAT_RATE = {{ config.VAT_RATE | tojson }};
 
     let vatAmount = 0;
     let vatableSalesNet = discountedGross;
@@ -723,7 +723,7 @@ document.addEventListener("DOMContentLoaded", function() {
 
         // compute cartGross locally (gross prices as shown in UI)
         const cartGross = cart.reduce((s,i) => s + (Number(i.price) || 0) * (i.qty || 0), 0);
-        const VAT_RATE = {{ (config.VAT_RATE) }};
+        const VAT_RATE = {{ config.VAT_RATE | tojson }};
 
         // Prepare final receipt numbers (prefer server values when sane; otherwise compute sensible fallbacks)
         let receiptTotal, receiptVat, receiptDiscount, receiptVatableSales, receiptSubtotal;

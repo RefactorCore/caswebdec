@@ -31,14 +31,13 @@
                         </td>
                         <td><span class="badge bg-secondary">{{ acc.type }}</span></td>
                         <td>
-                            <button class="btn btn-sm btn-outline-secondary" 
-                                    onclick="openEditModal(
-                                        '{{ acc.id }}', 
-                                        '{{ acc.code }}', 
-                                        '{{ acc.name }}', 
-                                        '{{ acc.type }}',
-                                        {{ (acc.name in system_accounts)|lower }} 
-                                    )">
+                            <!-- Use data-* attributes to avoid JS string-escaping issues -->
+                            <button class="btn btn-sm btn-outline-secondary edit-account-btn"
+                                    data-id="{{ acc.id }}"
+                                    data-code="{{ acc.code }}"
+                                    data-name="{{ acc.name|e }}"
+                                    data-type="{{ acc.type }}"
+                                    data-system="{{ 'true' if acc.name in system_accounts else 'false' }}">
                                 <i class="bi bi-pencil"></i> Edit
                             </button>
                         </td>
@@ -128,29 +127,31 @@
 </div>
 
 <script>
-// --- UPDATE THE FUNCTION SIGNATURE ---
-function openEditModal(id, code, name, type, isSystemAccount) {
+// Use event delegation on the buttons, safer and avoids inline JS escaping problems
+document.addEventListener('click', function (e) {
+    const btn = e.target.closest('.edit-account-btn');
+    if (!btn) return;
+
+    const id = btn.dataset.id;
+    const code = btn.dataset.code;
+    const name = btn.dataset.name;
+    const type = btn.dataset.type;
+    const isSystemAccount = btn.dataset.system === 'true';
+
     const form = document.getElementById('editForm');
     form.action = `/accounts/update/${id}`;
-    
+
     document.getElementById('editCode').value = code;
     document.getElementById('editType').value = type;
-    
-    // --- ADD THIS LOGIC ---
+
     const nameField = document.getElementById('editName');
     const nameHelp = document.getElementById('editNameHelp');
-    
+
     nameField.value = name;
-    
-    // --- FIX: Change .disabled to .readOnly ---
-    // A readonly field's value IS submitted with the form.
-    nameField.readOnly = isSystemAccount;
-    
-    // Show/hide the helper text
+    nameField.readOnly = !!isSystemAccount;
     nameHelp.style.display = isSystemAccount ? 'block' : 'none';
-    // --- END OF ADDED LOGIC ---
-    
+
     new bootstrap.Modal(document.getElementById('editAccountModal')).show();
-}
+});
 </script>
 {% endblock %}

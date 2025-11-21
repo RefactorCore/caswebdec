@@ -82,15 +82,15 @@
                                 <button class="btn btn-sm btn-primary"
                                         data-bs-toggle="modal"
                                         data-bs-target="#recordPaymentModal"
-                                        onclick="setPaymentDetails('AR', {{ inv.id }}, {{ balance }}, {{ inv.customer.wht_rate_percent if inv.customer else 0 }}, {{ inv.total - inv.vat }})">
+                                        onclick="setPaymentDetails('AR', {{ inv.id }}, {{ (inv.total - inv.paid) | float }}, {{ (inv.customer.wht_rate_percent if inv.customer else 0) | float }}, {{ ((inv.total - inv.vat) | float) }})">
                                     <i class="bi bi-cash"></i> Collect
                                 </button>
                                 {% endif %}
                                 
-                                <button class="btn btn-sm btn-outline-danger" 
-                                        data-bs-toggle="modal" 
+                                <button class="btn btn-sm btn-outline-danger"
+                                        data-bs-toggle="modal"
                                         data-bs-target="#voidInvoiceModal"
-                                        onclick="setVoidInvoiceTarget('{{ url_for('void.void_ar_invoice', invoice_id=inv.id) }}', '{{ inv.invoice_number or 'AR-' + inv.id|string }}', {{ inv.paid }})">
+                                        onclick="setVoidInvoiceTarget('{{ url_for('void.void_ar_invoice', invoice_id=inv.id) }}', '{{ inv.invoice_number or 'AR-' + inv.id|string }}', {{ inv.paid | float }})">
                                     <i class="bi bi-x-circle"></i> Void
                                 </button>
                             {% endif %}
@@ -258,7 +258,7 @@
 <div class="modal fade" id="newBillingInvoiceModal" tabindex="-1">
     <div class="modal-dialog modal-xl">
         <div class="modal-content">
-            <form action="{{ url_for('ar_ap.billing_invoices') }}" method="POST" id="billingInvoiceForm">
+            <form action="{{ url_for('ar_ap.billing_invoices') }}" method="POST" id="billingInvoiceForm" data-normalize-decimals>
                 <div class="modal-header bg-success text-white">
                     <h5 class="modal-title"><i class="bi bi-receipt me-2"></i>Create Billing Invoice</h5>
                     <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
@@ -350,7 +350,7 @@
 <div class="modal fade" id="recordPaymentModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <div class="modal-content">
-            <form action="{{ url_for('ar_ap.record_payment') }}" method="POST">
+            <form action="{{ url_for('ar_ap.record_payment') }}" method="POST" data-normalize-decimals>
                 <div class="modal-header">
                     <h5 class="modal-title">Record Payment</h5>
                     <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
@@ -575,43 +575,32 @@ function setPaymentDetails(refType, refId, balance, wht_rate, vatable_base) {
     document.getElementById('paymentRefType').value = refType;
     document.getElementById('paymentRefId').value = refId;
 
-    const fullBalance = parseFloat(balance) || 0;
-    const rate = parseFloat(wht_rate) || 0;
-    const vatable = parseFloat(vatable_base) || 0;
+    const fullBalance = Number(balance) || 0;
+    const rate = Number(wht_rate) || 0;
+    const vatable = Number(vatable_base) || 0;
 
-    // store for Calculate WHT button (modal is shared)
     window.currentWHTRate = rate;
     window.currentVatableBase = vatable;
 
-    // keep a hidden copy of the full balance for calculations
     document.getElementById('paymentFullBalance').value = fullBalance;
 
-    // do not auto-fill amounts — leave for user input
     document.getElementById('paymentAmount').value = '';
     document.getElementById('paymentWHT').value = '0';
 
-    // update UI displays
-    document.getElementById('maxBalance').innerText = '₱' + fullBalance.toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+    document.getElementById('maxBalance').innerText = window.formatMoney(fullBalance);
     const notice = document.getElementById('whtNotice');
-
-    // If the customer has a WHT rate, show informative notice but do not auto-set fields
     if (rate > 0) {
-        // compute what WHT would be on the vatable base for info
         const infoWHT = +(vatable * (rate / 100)).toFixed(2);
-        if (infoWHT <= fullBalance) {
-            notice.classList.remove('d-none');
-            notice.textContent = `Customer has ${rate}% WHT. Click "Calculate WHT" to apply on ₱${vatable.toFixed(2)}.`;
-        } else {
-            // WHT would exceed balance — still show info but warn
-            notice.classList.remove('d-none');
-            notice.textContent = `Customer has ${rate}% WHT but calculated WHT (₱${infoWHT.toFixed(2)}) exceeds balance. Adjust amount manually.`;
-        }
+        notice.classList.remove('d-none');
+        notice.dataset.info = notice.textContent = `Customer has ${rate}% WHT. Info WHT: ₱${infoWHT.toFixed(2)}.`;
     } else {
-        notice.classList.add('d-none');
-        notice.textContent = '';
+        if (notice) {
+            notice.classList.add('d-none');
+            notice.dataset.info = '';
+            notice.textContent = '';
+        }
     }
 
-    // update totals display
     calculateWHT();
 }
 

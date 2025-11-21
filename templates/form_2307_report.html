@@ -66,8 +66,8 @@
                 <tr>
                     <td>{{ p.date.strftime('%Y-%m-%d') }}</td>
                     <td>#{{ p.ref_id }}</td>
-                    <td class="text-end">{{ (p.amount / 1.12)|money }}</td> {# Assuming 12% VAT #}
-                    <td class="text-end">{{ p.wht_amount|money }}</td>
+                    <td class="text-end">{{ p.gross | money }}</td>
+                    <td class="text-end">{{ p.wht_amount | money }}</td>
                 </tr>
                 {% else %}
                 <tr>
@@ -79,13 +79,13 @@
             <tfoot class="table-group-divider fw-bold">
                 <tr>
                     <td colspan="2">Total</td>
-                    <td class="text-end">{{ (payments|sum(attribute='amount') / 1.12)|money }}</td>
-                    <td class="text-end">{{ payments|sum(attribute='wht_amount')|money }}</td>
+                    <td class="text-end">{{ total_gross | money }}</td>
+                    <td class="text-end">{{ total_wht | money }}</td>
                 </tr>
             </tfoot>
             {% endif %}
         </table>
-        <p class="text-muted small mt-3">Note: This report generates the data required to fill out BIR Form 2307. The gross amount is calculated as the cash payment received, net of 12% VAT.</p>
+        <p class="text-muted small mt-3">Note: This report generates the data required to fill out BIR Form 2307. The gross amount is calculated on the server (amount / 1.12) to avoid floating-point rounding issues.</p>
     </div>
 </div>
 {% endif %}

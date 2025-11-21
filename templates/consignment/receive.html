@@ -13,7 +13,7 @@
 
     <div class="card">
         <div class="card-body">
-            <form method="POST" id="consignmentForm">
+            <form method="POST" id="consignmentForm" data-normalize-decimals>
                 <div class="row mb-3">
                     <div class="col-md-6">
                         <label class="form-label">Supplier *</label>
@@ -162,6 +162,11 @@ function updateTotals() {
 }
 
 document.getElementById('consignmentForm').addEventListener('submit', function(e) {
+    // Ensure all numeric inputs are normalized to 2-decimal strings before we read them
+    if (window.normalizeDecimalForm) {
+        window.normalizeDecimalForm(this);
+    }
+    
     updateTotals();
     
     if (items.length === 0) {

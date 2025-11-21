@@ -18,7 +18,7 @@
       <div class="card shadow-sm text-center border-primary">
         <div class="card-body">
           <h6 class="text-muted">Total Sales ({{ current_filter_label }})</h6>
-          <h4 class="text-success">₱{{ total_sales | round(2) }}</h4>
+          <h4 class="text-success">₱{{ total_sales | money }}</h4>
           <!-- ✅ ADD THIS LINE -->
           <small class="text-muted">Includes Cash (POS) + Credit (AR)</small>
         </div>
@@ -29,7 +29,7 @@
       <div class="card shadow-sm text-center border-info">
         <div class="card-body">
           <h6 class="text-muted">Total Purchases ({{ current_filter_label }})</h6>
-          <h4 class="text-danger">₱{{ total_purchases | round(2) }}</h4>
+          <h4 class="text-danger">₱{{ total_purchases | money }}</h4>
           <!-- ✅ ADD THIS LINE -->
           <small class="text-muted">Includes Cash + Credit (AP)</small>
         </div>
@@ -40,7 +40,7 @@
       <div class="card shadow-sm text-center border-warning">
         <div class="card-body">
           <h6 class="text-muted">Inventory Value</h6>
-          <h4>₱{{ total_inventory_value | round(2) }}</h4>
+          <h4>₱{{ total_inventory_value | money }}</h4>
           <!-- ✅ UPDATE THIS LINE -->
           <small class="text-muted">{{ products_in_stock }} products (FIFO valued)</small>
         </div>
@@ -51,7 +51,7 @@
       <div class="card shadow-sm text-center border-success">
         <div class="card-body">
           <h6 class="text-muted">Net Income ({{ current_filter_label }})</h6>
-          <h4 class="text-success">₱{{ net_income | round(2) }}</h4>
+          <h4 class="text-success">₱{{ net_income | money }}</h4>
           <!-- ✅ ADD THIS LINE -->
           <small class="text-muted">Revenue - COGS - Expenses</small>
         </div>
@@ -102,7 +102,7 @@
                     {% endif %}
                   </div>
                   <div class="col-md-2">
-                    <strong class="text-danger">₱{{ "%.2f"|format(item.amount) }}</strong>
+                    <strong class="text-danger">₱{{ item.amount | money }}</strong>
                   </div>
                   <div class="col-md-3">
                     <small>Due: {{ item.due_date.strftime('%Y-%m-%d') }}</small><br>
@@ -155,7 +155,7 @@
                     {% endif %}
                   </div>
                   <div class="col-md-2">
-                    <strong class="text-warning">₱{{ "%.2f"|format(item.amount) }}</strong>
+                    <strong class="text-warning">₱{{ item.amount | money }}</strong>
                   </div>
                   <div class="col-md-3">
                     <small>Due: {{ item.due_date.strftime('%Y-%m-%d') }}</small><br>
@@ -204,7 +204,7 @@
                     {% endif %}
                   </div>
                   <div class="col-md-2">
-                    <strong>₱{{ "%.2f"|format(item.amount) }}</strong>
+                    <strong>₱{{ item.amount | money }}</strong>
                   </div>
                   <div class="col-md-3">
                     <small>Due: {{ item.due_date.strftime('%Y-%m-%d') }}</small><br>

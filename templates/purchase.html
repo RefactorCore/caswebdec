@@ -87,7 +87,7 @@
         <select id="product-select" class="form-select">
           <option value="">-- select existing product to auto-fill --</option>
           {% for p in products %}
-            <option value="{{ p.sku }}" data-name="{{ p.name }}" data-cost="{{ p.cost_price }}">{{ p.sku }} - {{ p.name }}</option>
+            <option value="{{ p.sku }}" data-name="{{ p.name }}" data-cost='{{ p.cost_price | num | tojson }}'>{{ p.sku }} - {{ p.name }}</option>
           {% endfor %}
         </select>
       </div>
