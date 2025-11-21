@@ -34,6 +34,28 @@ def to_decimal(value):
         return Decimal('0.00')
     return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
+# register money/num filters at blueprint registration time to ensure templates can use them
+@reports_bp.record
+def _register_jinja_filters(state):
+    app = state.app
+
+    def _money_filter(value):
+        """Format Decimal/number to 2-decimal string for display (no currency symbol)."""
+        try:
+            return format(to_decimal(value), '0.2f')
+        except Exception:
+            return "0.00"
+
+    def _num_filter(value):
+        """Return native float suitable for tojson / JS usage."""
+        try:
+            return float(to_decimal(value))
+        except Exception:
+            return 0.0
+
+    app.jinja_env.filters['money'] = _money_filter
+    app.jinja_env.filters['num'] = _num_filter
+
 @reports_bp.route('/trial-balance')
 @login_required
 @role_required('Admin', 'Accountant')
@@ -497,6 +519,8 @@ def summary_list_purchases():
     return render_template('slp.html', month=month, purchases=purchases,
                            grand_total_net=grand_total_net, grand_total_vat=grand_total_vat)
 
+# (insert into reports.py) - replace the existing form_2307_report function
+
 @reports_bp.route('/form-2307-report')
 @login_required
 @role_required('Admin', 'Accountant')
@@ -507,7 +531,7 @@ def form_2307_report():
     month = request.args.get('month', datetime.now().strftime('%Y-%m'))
     year, month_num = map(int, month.split('-'))
     
-    payments = []
+    payments_list = []
     customer = None
     if selected_customer_id:
         customer = Customer.query.get(selected_customer_id)
@@ -520,11 +544,34 @@ def form_2307_report():
         )
         payments = payments_query.all()
 
+        # Pre-compute Decimal-safe fields for the template (gross = amount / 1.12)
+        DIV_VAT = Decimal('1.12')
+        for p in payments:
+            amt = to_decimal(p.amount)
+            # gross amount (net of 12% VAT) -> amount / 1.12
+            try:
+                gross = (amt / DIV_VAT).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            except Exception:
+                gross = Decimal('0.00')
+            wht = to_decimal(p.wht_amount)
+            payments_list.append({
+                'date': p.date,
+                'ref_id': p.ref_id,
+                'amount': amt,
+                'gross': gross,
+                'wht_amount': wht
+            })
+
     company = CompanyProfile.query.first()
+
+    # Totals for display (Decimal)
+    total_gross = sum((p['gross'] for p in payments_list), Decimal('0.00')) if payments_list else Decimal('0.00')
+    total_wht = sum((p['wht_amount'] for p in payments_list), Decimal('0.00')) if payments_list else Decimal('0.00')
     
     return render_template('form_2307_report.html', customers=customers, 
                            selected_customer_id=selected_customer_id,
-                           month=month, payments=payments, customer=customer, company=company)
+                           month=month, payments=payments_list, customer=customer, company=company,
+                           total_gross=total_gross, total_wht=total_wht)
 
 @reports_bp.route('/ar-aging')
 @login_required

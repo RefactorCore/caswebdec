@@ -1,13 +1,13 @@
 from flask import Blueprint, render_template, request, flash, redirect, url_for
-from models import db, Account
-from flask_login import login_required
+from models import db, Account, JournalEntry
+from flask_login import login_required, current_user
 from .decorators import role_required
-from models import JournalEntry, Account # Make sure Account is imported
 import json
-from datetime import datetime # Import datetime
-from routes.utils import log_action # Import the log_action utility
-from flask_login import current_user # Import current_user
-from .utils import log_action
+from datetime import datetime
+from routes.utils import log_action
+from decimal import Decimal, ROUND_HALF_UP, getcontext
+
+getcontext().prec = 28
 
 accounts_bp = Blueprint('accounts', __name__, url_prefix='/accounts')
 
@@ -17,6 +17,31 @@ SYSTEM_ACCOUNT_NAMES = [
     'COGS', 'VAT Payable', 'VAT Input', 'Inventory Loss', 'Inventory Gain'
 ]
 
+
+def to_decimal(value):
+    """Coerce value (None, float, int, str, Decimal) -> Decimal quantized to 2dp."""
+    if value is None or value == '':
+        return Decimal('0.00')
+    if isinstance(value, Decimal):
+        return value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if isinstance(value, int):
+        return Decimal(value).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if isinstance(value, float):
+        try:
+            d = Decimal(str(value))
+        except Exception:
+            return Decimal('0.00')
+        return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    try:
+        d = Decimal(value)
+    except Exception:
+        try:
+            d = Decimal(str(value))
+        except Exception:
+            return Decimal('0.00')
+    return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+
 @accounts_bp.route('/')
 @login_required
 @role_required('Admin', 'Accountant')
@@ -24,10 +49,11 @@ def chart_of_accounts():
     """Display and manage the Chart of Accounts."""
     accounts = Account.query.order_by(Account.code).all()
     return render_template(
-        'chart_of_accounts.html', 
-        accounts=accounts, 
+        'chart_of_accounts.html',
+        accounts=accounts,
         system_accounts=SYSTEM_ACCOUNT_NAMES
     )
+
 
 @accounts_bp.route('/add', methods=['POST'])
 @login_required
@@ -53,12 +79,13 @@ def add_account():
     flash('Account added successfully.', 'success')
     return redirect(url_for('accounts.chart_of_accounts'))
 
+
 @accounts_bp.route('/update/<int:id>', methods=['POST'])
 @login_required
 @role_required('Admin', 'Accountant')
 def update_account(id):
     acc = Account.query.get_or_404(id)
-    
+
     new_code = request.form.get('code')
     new_name = request.form.get('name')
     new_type = request.form.get('type')
@@ -82,17 +109,20 @@ def update_account(id):
 
     # Log what changed
     changes = []
-    if acc.code != new_code: changes.append(f'code from "{acc.code}" to "{new_code}"')
-    if acc.name != new_name: changes.append(f'name from "{acc.name}" to "{new_name}"')
-    if acc.type != new_type: changes.append(f'type from "{acc.type}" to "{new_type}"')
+    if acc.code != new_code:
+        changes.append(f'code from "{acc.code}" to "{new_code}"')
+    if acc.name != new_name:
+        changes.append(f'name from "{acc.name}" to "{new_name}"')
+    if acc.type != new_type:
+        changes.append(f'type from "{acc.type}" to "{new_type}"')
 
     acc.code = new_code
     acc.name = new_name
     acc.type = new_type
-    
+
     if changes:
         log_action(f'Updated account {acc.id}: Changed {", ".join(changes)}.')
-    
+
     db.session.commit()
     flash('Account updated successfully.', 'success')
     return redirect(url_for('accounts.chart_of_accounts'))
@@ -134,36 +164,37 @@ def create_journal_entry():
         return redirect(url_for('accounts.new_journal_entry_form'))
 
     je_lines = []
-    total_debit = 0.0
-    total_credit = 0.0
+    total_debit = Decimal('0.00')
+    total_credit = Decimal('0.00')
 
     # Process each line
     for i in range(len(account_codes)):
         code = account_codes[i]
         try:
-            debit = float(debits[i] or 0.0)
-            credit = float(credits[i] or 0.0)
-        except ValueError:
+            debit = to_decimal(debits[i] if i < len(debits) else '0')
+            credit = to_decimal(credits[i] if i < len(credits) else '0')
+        except Exception:
             flash('Invalid debit/credit amount.', 'danger')
             return redirect(url_for('accounts.new_journal_entry_form'))
 
         if not code:
             flash('All lines must have an account selected.', 'danger')
             return redirect(url_for('accounts.new_journal_entry_form'))
-            
-        if debit < 0 or credit < 0:
+
+        if debit < Decimal('0.00') or credit < Decimal('0.00'):
             flash('Debit and credit amounts cannot be negative.', 'danger')
             return redirect(url_for('accounts.new_journal_entry_form'))
 
-        if debit > 0 and credit > 0:
+        if debit > Decimal('0.00') and credit > Decimal('0.00'):
             flash('A single line cannot have both a debit and a credit.', 'danger')
             return redirect(url_for('accounts.new_journal_entry_form'))
-            
-        if debit > 0 or credit > 0:
+
+        if debit > Decimal('0.00') or credit > Decimal('0.00'):
+            # Store amounts as formatted strings to preserve exact values in the JE JSON
             je_lines.append({
                 'account_code': code,
-                'debit': round(debit, 2),
-                'credit': round(credit, 2)
+                'debit': format(debit.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), '0.2f'),
+                'credit': format(credit.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP), '0.2f')
             })
             total_debit += debit
             total_credit += credit
@@ -172,8 +203,8 @@ def create_journal_entry():
     if not je_lines:
         flash('Cannot create an empty journal entry.', 'danger')
         return redirect(url_for('accounts.new_journal_entry_form'))
-        
-    if round(total_debit, 2) != round(total_credit, 2):
+
+    if total_debit.quantize(Decimal('0.01')) != total_credit.quantize(Decimal('0.01')):
         flash(f'Entry is unbalanced. Total Debits (₱{total_debit:,.2f}) do not equal Total Credits (₱{total_credit:,.2f}).', 'danger')
         return redirect(url_for('accounts.new_journal_entry_form'))
 
@@ -185,13 +216,15 @@ def create_journal_entry():
             created_at=entry_date  # Use the user-provided date
         )
         db.session.add(je)
-        
-        # Log this action
-        log_action(f'Created manual journal entry #{je.id} for "{description}" with total ₱{total_debit:,.2f}.', user=current_user)
-        
+        # flush so we can reference je.id in logs
+        db.session.flush()
+
+        # Log this action (pass current_user)
+        log_action(f'Created manual journal entry #{je.id} for \"{description}\" with total ₱{total_debit:,.2f}.', user=current_user)
+
         db.session.commit()
         flash('Manual journal entry created successfully.', 'success')
-        
+
         # Redirect to the main journal list
         return redirect(url_for('core.journal_entries'))
 

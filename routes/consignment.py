@@ -5,10 +5,39 @@ from routes.decorators import role_required
 from routes.utils import paginate_query, log_action
 from datetime import datetime, timedelta
 from sqlalchemy import func
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, ROUND_HALF_UP, getcontext
 
+getcontext().prec = 28
 
 consignment_bp = Blueprint('consignment', __name__, url_prefix='/consignment')
+
+# ============================================
+# Helpers
+# ============================================
+
+def to_decimal(value):
+    """Coerce value (None, float, int, str, Decimal) -> Decimal quantized to 2dp."""
+    if value is None:
+        return Decimal('0.00')
+    if isinstance(value, Decimal):
+        return value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if isinstance(value, int):
+        return Decimal(value).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    if isinstance(value, float):
+        try:
+            d = Decimal(str(value))
+        except Exception:
+            return Decimal('0.00')
+        return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    try:
+        d = Decimal(value)
+    except Exception:
+        try:
+            d = Decimal(str(value))
+        except Exception:
+            return Decimal('0.00')
+    return d.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
 
 # ============================================
 # CONSIGNMENT SUPPLIERS
@@ -23,27 +52,27 @@ def get_company_profile():
 def inject_company():
     return dict(get_company_profile=get_company_profile, datetime=datetime)
 
-    
+
 @consignment_bp.route('/suppliers')
 @login_required
 @role_required('Admin', 'Accountant')
 def suppliers():
     """List all consignment suppliers"""
     search = request.args.get('search', '').strip()
-    
+
     query = ConsignmentSupplier.query
-    
+
     if search:
         query = query.filter(
             (ConsignmentSupplier.name.ilike(f'%{search}%')) |
             (ConsignmentSupplier.tin.ilike(f'%{search}%'))
         )
-    
+
     query = query.order_by(ConsignmentSupplier.is_active.desc(), ConsignmentSupplier.name.asc())
     pagination = paginate_query(query, per_page=20)
-    
+
     safe_args = {k: v for k, v in request.args.items() if k != 'page'}
-    
+
     return render_template(
         'consignment/suppliers.html',
         suppliers=pagination.items,
@@ -59,6 +88,10 @@ def suppliers():
 def add_supplier():
     """Add a new consignment supplier"""
     try:
+        # parse values safely
+        commission_rate = to_decimal(request.form.get('commission_rate', 15))
+        payment_terms_days = int(request.form.get('payment_terms_days', 30))
+
         supplier = ConsignmentSupplier(
             name=request.form.get('name'),
             business_type=request.form.get('business_type'),
@@ -67,21 +100,22 @@ def add_supplier():
             contact_person=request.form.get('contact_person'),
             phone=request.form.get('phone'),
             email=request.form.get('email'),
-            default_commission_rate=float(request.form.get('commission_rate', 15)),
-            payment_terms_days=int(request.form.get('payment_terms_days', 30)),
+            # store as float if model expects float
+            default_commission_rate=float(commission_rate),
+            payment_terms_days=payment_terms_days,
             notes=request.form.get('notes')
         )
-        
+
         db.session.add(supplier)
         db.session.commit()
-        
+
         log_action(f'Added consignment supplier: {supplier.name}')
         flash(f'Supplier "{supplier.name}" added successfully!', 'success')
-        
+
     except Exception as e:
         db.session.rollback()
         flash(f'Error adding supplier: {str(e)}', 'danger')
-    
+
     return redirect(url_for('consignment.suppliers'))
 
 
@@ -91,8 +125,11 @@ def add_supplier():
 def edit_supplier(supplier_id):
     """Edit an existing consignment supplier"""
     supplier = ConsignmentSupplier.query.get_or_404(supplier_id)
-    
+
     try:
+        commission_rate = to_decimal(request.form.get('commission_rate', 15))
+        payment_terms_days = int(request.form.get('payment_terms_days', 30))
+
         supplier.name = request.form.get('name')
         supplier.business_type = request.form.get('business_type')
         supplier.tin = request.form.get('tin')
@@ -100,19 +137,19 @@ def edit_supplier(supplier_id):
         supplier.contact_person = request.form.get('contact_person')
         supplier.phone = request.form.get('phone')
         supplier.email = request.form.get('email')
-        supplier.default_commission_rate = float(request.form.get('commission_rate', 15))
-        supplier.payment_terms_days = int(request.form.get('payment_terms_days', 30))
+        supplier.default_commission_rate = float(commission_rate)
+        supplier.payment_terms_days = payment_terms_days
         supplier.notes = request.form.get('notes')
-        
+
         db.session.commit()
-        
+
         log_action(f'Updated consignment supplier: {supplier.name}')
         flash(f'Supplier "{supplier.name}" updated successfully!', 'success')
-        
+
     except Exception as e:
         db.session.rollback()
         flash(f'Error updating supplier: {str(e)}', 'danger')
-    
+
     return redirect(url_for('consignment.suppliers'))
 
 
@@ -122,14 +159,14 @@ def edit_supplier(supplier_id):
 def toggle_supplier(supplier_id):
     """Toggle supplier active status"""
     supplier = ConsignmentSupplier.query.get_or_404(supplier_id)
-    
+
     supplier.is_active = not supplier.is_active
     db.session.commit()
-    
+
     status = "activated" if supplier.is_active else "deactivated"
     log_action(f'{status.capitalize()} consignment supplier: {supplier.name}')
     flash(f'Supplier "{supplier.name}" {status}!', 'success')
-    
+
     return redirect(url_for('consignment.suppliers'))
 
 
@@ -145,64 +182,63 @@ def receive():
     if request.method == 'POST':
         try:
             supplier_id = int(request.form.get('supplier_id'))
-            commission_rate = float(request.form.get('commission_rate', 15))
+            commission_rate = to_decimal(request.form.get('commission_rate', 15))
             expected_return_days = request.form.get('expected_return_days')
             notes = request.form.get('notes')
             items_json = request.form.get('items_json')
-            
+
             # Parse items
             import json
             items = json.loads(items_json) if items_json else []
-            
+
             if not items:
                 flash('Please add at least one item to the consignment.', 'warning')
                 return redirect(url_for('consignment.receive'))
-            
+
             # Get supplier
             supplier = ConsignmentSupplier.query.get_or_404(supplier_id)
-            
+
             # Generate receipt number
-            from models import CompanyProfile
             profile = CompanyProfile.query.first()
-            
+
             if not hasattr(profile, 'next_consignment_number') or profile.next_consignment_number is None:
                 profile.next_consignment_number = 1
-            
+
             receipt_num = profile.next_consignment_number
             profile.next_consignment_number += 1
             receipt_number = f"CONS-{receipt_num:06d}"
-            
+
             # Calculate expected return date
             expected_return_date = None
             if expected_return_days:
                 expected_return_date = datetime.utcnow() + timedelta(days=int(expected_return_days))
-            
+
             # Create consignment
             consignment = ConsignmentReceived(
                 receipt_number=receipt_number,
                 supplier_id=supplier_id,
                 date_received=datetime.utcnow(),
                 expected_return_date=expected_return_date,
-                commission_rate=commission_rate,
+                commission_rate=float(commission_rate),
                 notes=notes,
                 created_by_id=current_user.id
             )
-            
+
             db.session.add(consignment)
             db.session.flush()
-            
+
             # Add items
             total_items = 0
-            total_value = 0.0
-            
+            total_value = Decimal('0.00')
+
             for item_data in items:
                 qty = int(item_data.get('quantity', 0))
-                # ✅ IMPROVED: Use Decimal for financial calculations
-                price = Decimal(str(item_data.get('retail_price', 0))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                
-                if qty <= 0 or price <= 0:
+                # Use to_decimal for financial calculations
+                price = to_decimal(item_data.get('retail_price', 0))
+
+                if qty <= 0 or price <= Decimal('0.00'):
                     continue
-                
+
                 item = ConsignmentItem(
                     consignment_id=consignment.id,
                     sku=item_data.get('sku'),
@@ -210,30 +246,32 @@ def receive():
                     description=item_data.get('description'),
                     barcode=item_data.get('barcode'),
                     quantity_received=qty,
-                    retail_price=float(price)  # Convert back to float for storage
+                    # original code stored float; keep storage compatible
+                    retail_price=price
                 )
-                
+
                 db.session.add(item)
-                
+
                 total_items += qty
-                total_value += float(qty * price)
-            
-            # Update consignment totals
+                total_value += (price * Decimal(qty))
+
+            # Update consignment totals (store as float if DB expects float)
             consignment.total_items = total_items
-            consignment.total_value = total_value
-            
+            # store as float for backward compatibility with DB columns that are floats
+            consignment.total_value = total_value.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
             db.session.commit()
-            
+
             log_action(f'Received consignment {receipt_number} from {supplier.name} - {total_items} items, ₱{total_value:,.2f}')
             flash(f'✅ Consignment {receipt_number} received successfully!', 'success')
-            
+
             return redirect(url_for('consignment.view_consignment', consignment_id=consignment.id))
-            
+
         except Exception as e:
             db.session.rollback()
             flash(f'❌ Error receiving consignment: {str(e)}', 'danger')
             return redirect(url_for('consignment.receive'))
-    
+
     # GET request - show form
     suppliers = ConsignmentSupplier.query.filter_by(is_active=True).order_by(ConsignmentSupplier.name).all()
     return render_template('consignment/receive.html', suppliers=suppliers)
@@ -250,23 +288,23 @@ def list_received():
     """List all received consignments"""
     search = request.args.get('search', '').strip()
     status_filter = request.args.get('status', 'all')
-    
+
     query = ConsignmentReceived.query
-    
+
     if status_filter != 'all':
         query = query.filter_by(status=status_filter)
-    
+
     if search:
         query = query.join(ConsignmentSupplier).filter(
             (ConsignmentReceived.receipt_number.ilike(f'%{search}%')) |
             (ConsignmentSupplier.name.ilike(f'%{search}%'))
         )
-    
+
     query = query.order_by(ConsignmentReceived.date_received.desc())
     pagination = paginate_query(query, per_page=20)
-    
+
     safe_args = {k: v for k, v in request.args.items() if k != 'page'}
-    
+
     return render_template(
         'consignment/list.html',
         consignments=pagination.items,
@@ -284,18 +322,17 @@ def view_consignment(consignment_id):
     """View detailed consignment information"""
     consignment = ConsignmentReceived.query.get_or_404(consignment_id)
     items = ConsignmentItem.query.filter_by(consignment_id=consignment_id).all()
-    
-    # --- ADD THIS CALCULATION ---
-    # Calculate total paid from all remittances for this consignment
-    total_paid = db.session.query(func.sum(ConsignmentRemittance.amount_paid))\
+
+    # Calculate total paid from all remittances for this consignment (Decimal-safe)
+    total_paid = to_decimal(db.session.query(func.coalesce(func.sum(ConsignmentRemittance.amount_paid), 0.0))\
         .filter(ConsignmentRemittance.consignment_id == consignment.id)\
-        .scalar() or 0.0
-    
+        .scalar())
+
     return render_template(
         'consignment/view.html',
         consignment=consignment,
         items=items,
-        total_paid=total_paid  # <-- Pass the calculated value here
+        total_paid=total_paid  # Decimal
     )
 
 
@@ -305,16 +342,16 @@ def view_consignment(consignment_id):
 def adjust_item(item_id):
     """Mark items as damaged (cannot be sold or returned)"""
     item = ConsignmentItem.query.get_or_404(item_id)
-    
+
     try:
         qty_damaged = int(request.form.get('quantity_damaged', 0))
         damage_reason = request.form.get('damage_reason', '').strip()
-        
+
         # Validate quantity
         if qty_damaged < 0:
             flash('Damaged quantity cannot be negative.', 'danger')
             return redirect(url_for('consignment.view_consignment', consignment_id=item.consignment_id))
-        
+
         # Validate total doesn't exceed available
         max_can_damage = item.quantity_received - item.quantity_sold - item.quantity_returned
         if qty_damaged > max_can_damage:
@@ -325,12 +362,12 @@ def adjust_item(item_id):
                 'danger'
             )
             return redirect(url_for('consignment.view_consignment', consignment_id=item.consignment_id))
-            
+
         # Update damaged quantity
         item.quantity_damaged = qty_damaged
-        
+
         db.session.commit()
-        
+
         reason_text = f" - Reason: {damage_reason}" if damage_reason else ""
         log_action(
             f'Marked {qty_damaged} units of {item.product_name} as damaged on consignment {item.consignment.receipt_number}{reason_text}'
@@ -340,14 +377,14 @@ def adjust_item(item_id):
             f'Available for sale/return: {item.quantity_available}',
             'success'
         )
-        
+
     except ValueError as e:
         db.session.rollback()
         flash(f'Invalid input: {str(e)}', 'danger')
     except Exception as e:
         db.session.rollback()
         flash(f'Error updating item: {str(e)}', 'danger')
-    
+
     return redirect(url_for('consignment.view_consignment', consignment_id=item.consignment_id))
 
 
@@ -358,67 +395,66 @@ def adjust_item(item_id):
 def remit_payment(consignment_id):
     """Complete settlement: Return unsold items and remit payment to supplier"""
     consignment = ConsignmentReceived.query.get_or_404(consignment_id)
-    
+
     try:
-        amount_paid = float(request.form.get('amount_paid'))
+        amount_paid = to_decimal(request.form.get('amount_paid'))
         payment_method = request.form.get('payment_method', 'Cash')
         reference_number = request.form.get('reference_number', '').strip()
         notes = request.form.get('notes', '').strip()
-        
+
         # Validate payment amount
-        if amount_paid <= 0:
+        if amount_paid <= Decimal('0.00'):
             flash('Payment amount must be greater than zero.', 'danger')
             return redirect(url_for('consignment.view_consignment', consignment_id=consignment_id))
-        
-        # Calculate totals
-        total_already_paid = db.session.query(func.sum(ConsignmentRemittance.amount_paid))\
+
+        # Calculate totals (Decimal-safe)
+        total_already_paid = to_decimal(db.session.query(func.coalesce(func.sum(ConsignmentRemittance.amount_paid), 0.0))\
             .filter(ConsignmentRemittance.consignment_id == consignment.id)\
-            .scalar() or 0.0
-        
-        amount_due = consignment.get_amount_due_to_supplier()
-        remaining_due = amount_due - total_already_paid
-        
+            .scalar())
+
+        amount_due = to_decimal(consignment.get_amount_due_to_supplier())
+        remaining_due = (amount_due - total_already_paid).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
         # Warn if overpayment
-        if amount_paid > remaining_due + 0.01:
+        if amount_paid > (remaining_due + Decimal('0.01')):
             flash(
                 f'⚠️ Warning: Payment amount (₱{amount_paid:,.2f}) exceeds remaining due (₱{remaining_due:,.2f}).',
                 'warning'
             )
-        
-        # ✅ FIX: Calculate returns BEFORE modifying quantities
+
+        # Calculate returns BEFORE modifying quantities
         total_returned = 0
-        items_being_returned = []  # Track for receipt
-        
+        items_being_returned = []
+
         for item in consignment.items:
             # Calculate available BEFORE any modifications
             current_available = item.quantity_received - item.quantity_sold - item.quantity_returned - item.quantity_damaged
-            
+
             if current_available > 0:
-                # Store details for receipt
                 items_being_returned.append({
                     'sku': item.sku,
                     'name': item.product_name,
                     'quantity': current_available,
-                    'retail_price': item.retail_price,
-                    'total_value': current_available * item.retail_price
+                    'retail_price': to_decimal(item.retail_price),
+                    'total_value': (to_decimal(item.retail_price) * to_decimal(current_available)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 })
-                
-                # ✅ FIX: Set the final returned quantity (not +=)
+
+                # Set returned quantity explicitly
                 item.quantity_returned = item.quantity_received - item.quantity_sold - item.quantity_damaged
                 total_returned += current_available
-                
+
                 log_action(
                     f'Auto-returned {current_available} units of {item.product_name} '
                     f'on settlement of {consignment.receipt_number}'
                 )
-        
-        # Create remittance record with detailed info
+
+        # Create remittance record
         settlement_notes = f"Returned {total_returned} unsold items. "
         if reference_number:
             settlement_notes = f"Ref: {reference_number}. " + settlement_notes
         if notes:
             settlement_notes += notes
-        
+
         remittance = ConsignmentRemittance(
             consignment_id=consignment.id,
             amount_paid=amount_paid,
@@ -427,68 +463,74 @@ def remit_payment(consignment_id):
             created_by_id=current_user.id
         )
         db.session.add(remittance)
-        db.session.flush()  # Get remittance ID
-        
+        db.session.flush()
+
         # Update consignment status
-        new_total_paid = total_already_paid + amount_paid
-        if new_total_paid >= amount_due - 0.01:
+        new_total_paid = (total_already_paid + amount_paid).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        if new_total_paid >= (amount_due - Decimal('0.01')):
             consignment.status = 'Closed'
             status_msg = '✅ Consignment fully settled and closed!'
         else:
             consignment.status = 'Partial'
             status_msg = f'✅ Partial payment recorded. Remaining: ₱{(amount_due - new_total_paid):,.2f}'
-        
-        # Create journal entry
+
+        # Create journal entry (use formatted strings for entries_json amounts)
         from models import JournalEntry
         from routes.utils import get_system_account_code
         import json
-        
+
         je_lines = [
             {
                 'account_code': get_system_account_code('Consignment Payable'),
-                'debit': float(amount_paid),
-                'credit': 0
+                'debit': format(amount_paid, '0.2f'),
+                'credit': "0.00"
             },
             {
                 'account_code': get_system_account_code('Cash'),
-                'debit': 0,
-                'credit': float(amount_paid)
+                'debit': "0.00",
+                'credit': format(amount_paid, '0.2f')
             }
         ]
-        
+
         journal_entry = JournalEntry(
             description=f'Settlement for {consignment.receipt_number}: Paid {consignment.supplier.name} ₱{amount_paid:,.2f}, Returned {total_returned} items',
             entries_json=json.dumps(je_lines)
         )
         db.session.add(journal_entry)
-        
+
         db.session.commit()
-        
+
         log_action(
             f'Completed settlement for {consignment.receipt_number}: '
             f'Paid ₱{amount_paid:,.2f}, Returned {total_returned} items. '
             f'Total paid: ₱{new_total_paid:,.2f} / ₱{amount_due:,.2f}'
         )
-        
+
         flash(status_msg, 'success')
         flash(f'📦 Returned {total_returned} unsold items to supplier.', 'info')
-        
-        # ✅ NEW: Store settlement details in session for receipt
-        from flask import session
+
+        # Store settlement details in session for receipt (convert Decimals to floats/strings for JSON-serializable session)
         session['last_settlement'] = {
             'remittance_id': remittance.id,
             'consignment_id': consignment.id,
             'receipt_number': consignment.receipt_number,
             'supplier_name': consignment.supplier.name,
             'date': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
-            'items_returned': items_being_returned,
+            'items_returned': [
+                {
+                    'sku': it['sku'],
+                    'name': it['name'],
+                    'quantity': it['quantity'],
+                    'retail_price': float(it['retail_price']),
+                    'total_value': float(it['total_value'])
+                } for it in items_being_returned
+            ],
             'total_returned': total_returned,
-            'amount_paid': amount_paid,
+            'amount_paid': float(amount_paid),
             'payment_method': payment_method,
             'reference_number': reference_number
         }
-        
-        # Redirect to settlement receipt
+
         return redirect(url_for('consignment.settlement_receipt', remittance_id=remittance.id))
 
     except ValueError as e:
@@ -497,7 +539,7 @@ def remit_payment(consignment_id):
     except Exception as e:
         db.session.rollback()
         flash(f'Error processing settlement: {str(e)}', 'danger')
-    
+
     return redirect(url_for('consignment.view_consignment', consignment_id=consignment_id))
 
 
@@ -508,27 +550,27 @@ def settlement_receipt(remittance_id):
     """Display settlement receipt showing returned items and payment"""
     remittance = ConsignmentRemittance.query.get_or_404(remittance_id)
     consignment = remittance.consignment
-    
+
     # Get all items with their final quantities
     items = ConsignmentItem.query.filter_by(consignment_id=consignment.id).all()
-    
+
     # Calculate totals
-    total_received = sum(item.quantity_received for item in items)
-    total_sold = sum(item.quantity_sold for item in items)
-    total_returned = sum(item.quantity_returned for item in items)
-    total_damaged = sum(item.quantity_damaged for item in items)
-    
+    total_received = sum(int(item.quantity_received) for item in items)
+    total_sold = sum(int(item.quantity_sold) for item in items)
+    total_returned = sum(int(item.quantity_returned) for item in items)
+    total_damaged = sum(int(item.quantity_damaged) for item in items)
+
     # Get all remittances for this consignment
     all_remittances = ConsignmentRemittance.query.filter_by(consignment_id=consignment.id)\
         .order_by(ConsignmentRemittance.date_paid).all()
-    
-    total_paid = sum(r.amount_paid for r in all_remittances)
-    
-    # Calculate financial summary
-    total_sold_value = consignment.get_total_sold_value()
-    commission_earned = consignment.get_commission_earned()
-    amount_due_total = consignment.get_amount_due_to_supplier()
-    
+
+    total_paid = to_decimal(sum((to_decimal(r.amount_paid) for r in all_remittances), Decimal('0.00')))
+
+    # Calculate financial summary (ensure Decimal-safe)
+    total_sold_value = to_decimal(consignment.get_total_sold_value())
+    commission_earned = to_decimal(consignment.get_commission_earned())
+    amount_due_total = to_decimal(consignment.get_amount_due_to_supplier())
+
     return render_template(
         'consignment/settlement_receipt.html',
         remittance=remittance,
