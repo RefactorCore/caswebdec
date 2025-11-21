@@ -590,8 +590,8 @@ def ar_aging():
     totals = { 'current': Decimal('0.00'), '1-30': Decimal('0.00'), '31-60': Decimal('0.00'), '61-90': Decimal('0.00'), '91+': Decimal('0.00'), 'total': Decimal('0.00') }
 
     for inv in invoices:
-        due_date = inv.date.date() # Convert datetime to date
-        age = (today - due_date).days
+        age_date = inv.due_date.date() if inv.due_date else inv.date.date()
+        age = (today - age_date).days
         balance = to_decimal(inv.total) - to_decimal(inv.paid)
         totals['total'] += balance
 
@@ -630,8 +630,8 @@ def ap_aging():
     totals = { 'current': Decimal('0.00'), '1-30': Decimal('0.00'), '31-60': Decimal('0.00'), '61-90': Decimal('0.00'), '91+': Decimal('0.00'), 'total': Decimal('0.00') }
 
     for inv in invoices:
-        due_date = inv.date.date()
-        age = (today - due_date).days
+        age_date = inv.due_date.date() if inv.due_date else inv.date.date()
+        age = (today - age_date).days
         balance = to_decimal(inv.total) - to_decimal(inv.paid)
         totals['total'] += balance
 

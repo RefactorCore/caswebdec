@@ -898,10 +898,10 @@ def purchase():
                 line_net = (Decimal(qty) * unit_cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 if purchase_is_vatable:
                     # Compute VAT portion from gross net (line_net is net of markup; original code used gross then derived VAT)
-                    vat = (line_net * VAT_DEC / (Decimal('1.00') + VAT_DEC)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                    vat = (line_net * VAT_DEC).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 else:
                     vat = Decimal('0.00')
-                line_total = (line_net + vat).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                line_total = line_net
 
                 product = Product.query.filter_by(sku=sku_arg).first() if sku_arg else None
                 final_sku = sku_arg
