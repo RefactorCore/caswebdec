@@ -65,6 +65,22 @@
         </div>
       </div>
 
+      <div class="col-md-2">
+      <label class="form-label fw-semibold">Payment Type</label>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="payment_type" id="paymentTypeCredit" value="Credit" checked>
+        <label class="form-check-label" for="paymentTypeCredit">Credit</label>
+      </div>
+      <div class="form-check form-check-inline">
+        <input class="form-check-input" type="radio" name="payment_type" id="paymentTypeCash" value="Cash">
+        <label class="form-check-label" for="paymentTypeCash">Cash</label>
+      </div>
+    </div>
+    <div class="col-md-3" id="dueDateContainer">
+      <label class="form-label fw-semibold">Payment Due Date</label>
+      <input type="date" name="due_date" class="form-control">
+    </div>
+
       <div class="col-md-2 d-flex align-items-end justify-content-end">
         <button type="submit" class="btn btn-success px-4">💾 Record Purchase</button>
       </div>
@@ -456,6 +472,30 @@ document.getElementById('add-p').onclick = (e) => {
 document.getElementById('purchaseIsVatable').addEventListener('change', () => {
   render();
 });
+
+function toggleDueDate() {
+    const paymentType = document.querySelector('input[name="payment_type"]:checked').value;
+    const dueDateContainer = document.getElementById('dueDateContainer');
+    const dueDateInput = dueDateContainer.querySelector('input[name="due_date"]');
+
+    if (paymentType === 'Credit') {
+        dueDateContainer.style.display = 'block';
+        // For credit, due date is important. Mark it as required.
+        dueDateInput.required = true; 
+    } else {
+        dueDateContainer.style.display = 'none';
+        dueDateInput.required = false;
+        dueDateInput.value = ''; // Clear date for cash
+    }
+}
+
+// Attach event listeners to the radio buttons
+document.querySelectorAll('input[name="payment_type"]').forEach(radio => {
+    radio.addEventListener('change', toggleDueDate);
+});
+
+// Initial call to set the correct state on load
+document.addEventListener('DOMContentLoaded', toggleDueDate);
 
 // Final form submission
 document.getElementById('purchase-form').addEventListener('submit', (e) => {
