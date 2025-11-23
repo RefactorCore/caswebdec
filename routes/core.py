@@ -849,6 +849,7 @@ def api_products_search():
     return jsonify(results)
 
 
+
 @core_bp.route('/purchase', methods=['GET', 'POST'])
 @login_required
 @role_required('Admin', 'Accountant', 'Cashier')
@@ -858,6 +859,9 @@ def purchase():
             from routes.fifo_utils import create_inventory_lot
 
             supplier_name = request.form.get('supplier', '').strip() or 'Unknown'
+            
+            # --- START: NEW PAYMENT/DATE CAPTURE LOGIC ---
+            date_str = request.form.get('date') # Capture the purchase date
             items_raw = request.form.get('items_json')
             items = json.loads(items_raw) if items_raw else []
 
@@ -866,14 +870,45 @@ def purchase():
                 return redirect(url_for('core.purchase'))
 
             purchase_is_vatable = 'is_vatable' in request.form
+            
+            # 1. Capture Payment Type and Due Date
+            payment_type = request.form.get('payment_type', 'Credit') # 'Credit' or 'Cash'
+            due_date_str = request.form.get('due_date')
 
+            due_date = None
+            purchase_status = 'Open' # Default for Credit
+            credit_account_code = get_system_account_code('Accounts Payable') # Default to 201
+            
+            if payment_type == 'Cash':
+                # If paid by Cash, the balancing credit goes to Cash (Asset decrease)
+                credit_account_code = get_system_account_code('Cash') # Account 101
+                purchase_status = 'Paid' # Immediate payment
+            
+            if payment_type == 'Credit' and due_date_str:
+                try:
+                    due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
+                except ValueError:
+                    # Log error, but proceed with None date
+                    log_action(f"Warning: Invalid due date format for purchase from {supplier_name}")
+            # --- END: NEW PAYMENT/DATE CAPTURE LOGIC ---
+            
             supplier = Supplier.query.filter_by(name=supplier_name).first()
             if not supplier and supplier_name != 'Unknown':
                 supplier = Supplier(name=supplier_name)
                 db.session.add(supplier)
                 db.session.flush()
 
-            purchase = Purchase(total=Decimal('0.00'), vat=Decimal('0.00'), supplier=supplier_name, is_vatable=purchase_is_vatable)
+            # 2. Update Purchase Object Creation
+            purchase = Purchase(
+                total=Decimal('0.00'), 
+                vat=Decimal('0.00'), 
+                supplier=supplier_name, 
+                is_vatable=purchase_is_vatable,
+                # New fields
+                due_date=due_date,
+                payment_type=payment_type,
+                status=purchase_status
+            )
             db.session.add(purchase)
             db.session.flush()
 
@@ -897,11 +932,12 @@ def purchase():
 
                 line_net = (Decimal(qty) * unit_cost).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 if purchase_is_vatable:
-                    # Compute VAT portion from gross net (line_net is net of markup; original code used gross then derived VAT)
+                    # Compute VAT portion from net cost
                     vat = (line_net * VAT_DEC).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
                 else:
                     vat = Decimal('0.00')
-                line_total = line_net
+                # Line total in the original code was net, but total/vat_total logic below assumes gross total
+                line_total = line_net + vat 
 
                 product = Product.query.filter_by(sku=sku_arg).first() if sku_arg else None
                 final_sku = sku_arg
@@ -955,34 +991,44 @@ def purchase():
                     purchase_item_id=purchase_item.id
                 )
 
-                total += line_total
-                vat_total += vat
+                total += line_net # Sum of Net Costs
+                vat_total += vat # Sum of VAT
+
+            # Recalculate based on final totals (total is now NET COST of all items)
+            net_total = total
+            total = net_total + vat_total # This is the Gross Total (to be credited)
 
             purchase.total = total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             purchase.vat = vat_total.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-            if purchase_is_vatable:
-                journal_lines = [
-                    {"account_code": get_system_account_code('Inventory'), "debit": format((total - vat_total).quantize(Decimal('0.01')), '0.2f'), "credit": "0.00"},
-                    {"account_code": get_system_account_code('VAT Input'), "debit": format(vat_total.quantize(Decimal('0.01')), '0.2f'), "credit": "0.00"},
-                    {"account_code": get_system_account_code('Accounts Payable'), "debit": "0.00", "credit": format(total.quantize(Decimal('0.01')), '0.2f')}
-                ]
-            else:
-                journal_lines = [
-                    {"account_code": get_system_account_code('Inventory'), "debit": format(total.quantize(Decimal('0.01')), '0.2f'), "credit": "0.00"},
-                    {"account_code": get_system_account_code('Accounts Payable'), "debit": "0.00", "credit": format(total.quantize(Decimal('0.01')), '0.2f')}
-                ]
+            # 3. Journal Entry Logic (Unified)
+            
+            journal_lines = [
+                # DEBIT 1: Inventory (Net Cost of Goods)
+                {"account_code": get_system_account_code('Inventory'), "debit": format(net_total.quantize(Decimal('0.01')), '0.2f'), "credit": "0.00"},
+            ]
+            
+            if vat_total > Decimal('0.00'):
+                # DEBIT 2: VAT Input (The recoverable tax asset)
+                journal_lines.append({"account_code": get_system_account_code('VAT Input'), "debit": format(vat_total.quantize(Decimal('0.01')), '0.2f'), "credit": "0.00"})
+                
+            # CREDIT: The balancing entry (Cash or Accounts Payable)
+            journal_lines.append({
+                "account_code": credit_account_code, # Dynamically set to 'Cash' or 'Accounts Payable'
+                "debit": "0.00", 
+                "credit": format(total.quantize(Decimal('0.01')), '0.2f') # Gross Total
+            })
 
             journal = JournalEntry(
-                description=f"Purchase #{purchase.id} - {supplier_name}",
+                description=f"Purchase #{purchase.id} - {supplier_name} ({payment_type})",
                 entries_json=json.dumps(journal_lines)
             )
             db.session.add(journal)
 
-            log_action(f'Recorded Purchase #{purchase.id} from {supplier_name} for ₱{total:,.2f}.')
+            log_action(f'Recorded Purchase #{purchase.id} from {supplier_name} for ₱{total:,.2f} ({payment_type}).')
             db.session.commit()
 
-            flash(f"✅ Purchase #{purchase.id} recorded successfully.", "success")
+            flash(f"✅ Purchase #{purchase.id} recorded successfully. Payment Type: {payment_type}.", "success")
             return redirect(url_for('core.purchases'))
 
         except Exception as e:

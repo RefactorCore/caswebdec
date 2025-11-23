@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, send_file
 from flask_login import login_required, current_user
-from models import db, Customer, Supplier, ARInvoice, APInvoice, Payment, JournalEntry, CreditMemo, Account, Product, ARInvoiceItem, RecurringBill, ConsignmentRemittance
+from models import db, Customer, Supplier, ARInvoice, APInvoice, Payment, JournalEntry, CreditMemo, Account, Product, ARInvoiceItem, RecurringBill, ConsignmentRemittance, Purchase
 import io, csv
 import json
 from .decorators import role_required
@@ -816,3 +816,81 @@ def delete_recurring_bill(bill_id):
         flash(f'Error deleting bill: {str(e)}', 'danger')
 
     return redirect(url_for('ar_ap.recurring_bills'))
+
+# In routes/ar_ap.py, before the recurring bill routes:
+
+@ar_ap_bp.route('/purchase/pay/<int:purchase_id>', methods=['POST'])
+@login_required
+@role_required('Admin', 'Accountant', 'Cashier')
+def record_purchase_payment(purchase_id):
+    """
+    Records a payment made against a Purchase (clears the Accounts Payable liability).
+    """
+    purchase = Purchase.query.get_or_404(purchase_id)
+    
+    # Ensure purchase is not already paid or cancelled
+    if purchase.status in ['Paid', 'Canceled', 'Voided']:
+        flash(f'Purchase #{purchase_id} is already marked as {purchase.status}. No payment recorded.', 'warning')
+        return redirect(request.referrer or url_for('core.view_purchase', purchase_id=purchase_id))
+
+    try:
+        payment_amount = to_decimal(request.form.get('payment_amount'))
+        payment_method = request.form.get('payment_method') or 'Cash'
+        reference = request.form.get('reference') or ''
+        
+        balance_due = purchase.total - purchase.paid
+
+        if payment_amount <= Decimal('0.00'):
+            flash('Payment amount must be greater than zero.', 'danger')
+            return redirect(request.referrer)
+
+        if payment_amount > balance_due:
+            flash(f'Payment amount (₱{payment_amount:.2f}) exceeds balance due (₱{balance_due:.2f}). Please pay ₱{balance_due:.2f} or less.', 'danger')
+            return redirect(request.referrer)
+
+        # 1. Update Purchase Record
+        purchase.paid += payment_amount
+        
+        if purchase.paid.quantize(Decimal('0.01')) >= purchase.total.quantize(Decimal('0.01')):
+            purchase.status = 'Paid'
+        elif purchase.paid > Decimal('0.00'):
+            purchase.status = 'Partial'
+
+        # 2. Create Payment Record (for detailed tracking, optional but good practice)
+        payment = Payment(
+            date=datetime.utcnow(),
+            amount=payment_amount,
+            ref_type='Purchase',
+            ref_id=purchase.id,
+            method=payment_method,
+            wht_amount=Decimal('0.00') # Simplified: No WHT handling here
+        )
+        db.session.add(payment)
+        
+        # 3. Create Journal Entry (DR Accounts Payable / CR Cash)
+        ap_code = get_system_account_code('Accounts Payable')
+        cash_code = get_system_account_code('Cash') # Assuming cash/bank payments use this GL account
+
+        je_lines = [
+            # DR: Liability decreases
+            {"account_code": ap_code, "debit": format(payment_amount, '0.2f'), "credit": "0.00"}, 
+            # CR: Cash/Bank Asset decreases
+            {"account_code": cash_code, "debit": "0.00", "credit": format(payment_amount, '0.2f')} 
+        ]
+
+        journal = JournalEntry(
+            description=f"Payment for Purchase #{purchase.id} - {purchase.supplier} ({payment_method})",
+            entries_json=json.dumps(je_lines)
+        )
+        db.session.add(journal)
+
+        log_action(f'Recorded payment of ₱{payment_amount:,.2f} for Purchase #{purchase.id}. Status: {purchase.status}.')
+        db.session.commit()
+        
+        flash(f"✅ Payment of ₱{payment_amount:,.2f} recorded successfully. Purchase status: {purchase.status}.", "success")
+        return redirect(url_for('core.view_purchase', purchase_id=purchase.id))
+
+    except Exception as e:
+        db.session.rollback()
+        flash(f"❌ Error recording payment: {str(e)}", "danger")
+        return redirect(request.referrer)
