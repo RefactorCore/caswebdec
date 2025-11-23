@@ -203,6 +203,9 @@ class Purchase(db.Model):
     status = db.Column(db.String(50), default='Recorded', nullable=False)
     items = db.relationship('PurchaseItem', backref='purchase', cascade='all, delete-orphan')
 
+    due_date = db.Column(db.DateTime, nullable=True)
+    payment_type = db.Column(db.String(20), nullable=False, default='Credit')
+    paid = db.Column(Money(), nullable=False, default=Decimal('0.00'))
 
     voided_at = db.Column(db.DateTime, nullable=True)
     voided_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
