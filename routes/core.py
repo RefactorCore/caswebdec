@@ -143,12 +143,17 @@ def setup_admin():
 @core_bp.route('/')
 @login_required
 def index():
-    # --- Base data ---
-    products = Product.query.all()
-    low_stock = [p for p in products if p.quantity <= 5 and p.is_active]
+    # --- 1. Imports & Base Data ---
+    from models import (Product, Sale, Purchase, ARInvoice, APInvoice, 
+                       InventoryLot, SaleItem, Account, AuditLog)
+    from routes.reports import aggregate_account_balances
 
-    # --- 📊 INVENTORY VALUE: Calculate from FIFO lots (not product.cost_price) ---
-    from models import InventoryLot
+    # Base Product Data
+    products = Product.query.all()
+    # Filter active products with low stock
+    low_stock = [p for p in products if p.quantity <= (getattr(p, 'reorder_point', 5) or 5) and p.is_active]
+
+    # --- 2. Inventory Value (FIFO) ---
     total_inventory_value = to_decimal(db.session.query(
         func.coalesce(func.sum(InventoryLot.quantity_remaining * InventoryLot.unit_cost), 0)
     ).join(Product).filter(
@@ -158,13 +163,12 @@ def index():
 
     products_in_stock = Product.query.filter(Product.quantity > 0, Product.is_active == True).count()
 
-    # --- Get period filter (default to '7' days) ---
+    # --- 3. Date & Period Filtering ---
     period = request.args.get('period', '7')
     today = datetime.utcnow()
     start_date = None
     current_filter_label = ''
 
-    # --- Set start_date and label based on the period ---
     if period == '12':
         start_date = today - timedelta(hours=12)
         current_filter_label = 'Last 12 Hours'
@@ -178,57 +182,48 @@ def index():
         start_date = today - timedelta(days=7)
         current_filter_label = 'Last 7 Days'
 
-    # --- 📊 SALES: Include both Cash (POS) and Credit (AR Invoices) ---
-    from models import ARInvoice, APInvoice
+    # --- 4. 📊 KPI CALCULATIONS ---
+    
+    # SALES: Cash (POS) + AR (Invoices)
+    cash_sales_query = db.session.query(func.coalesce(func.sum(Sale.total), 0)).filter(Sale.voided_at.is_(None))
+    ar_sales_query = db.session.query(func.coalesce(func.sum(ARInvoice.total), 0)).filter(ARInvoice.voided_at.is_(None))
+    
+    # PURCHASES: Inventory Purchases (Cash + Credit) + AP Bills
+    # FIX: We sum ALL Purchase records (Cash AND Credit) that are not voided
+    inventory_purchases_query = db.session.query(func.coalesce(func.sum(Purchase.total), 0)).filter(Purchase.voided_at.is_(None))
+    # AP Bills (Expenses/Utilities)
+    ap_bills_query = db.session.query(func.coalesce(func.sum(APInvoice.total), 0)).filter(APInvoice.voided_at.is_(None))
 
-    cash_sales_query = db.session.query(func.coalesce(func.sum(Sale.total), 0))
-    ar_sales_query = db.session.query(func.coalesce(func.sum(ARInvoice.total), 0))
-
-    cash_purchases_query = db.session.query(func.coalesce(func.sum(Purchase.total), 0))
-    ap_purchases_query = db.session.query(func.coalesce(func.sum(APInvoice.total), 0))
-
+    # Apply Date Filters
     if start_date:
         cash_sales_query = cash_sales_query.filter(Sale.created_at >= start_date)
         ar_sales_query = ar_sales_query.filter(ARInvoice.date >= start_date)
-        cash_purchases_query = cash_purchases_query.filter(Purchase.created_at >= start_date)
-        ap_purchases_query = ap_purchases_query.filter(APInvoice.date >= start_date)
+        inventory_purchases_query = inventory_purchases_query.filter(Purchase.created_at >= start_date)
+        ap_bills_query = ap_bills_query.filter(APInvoice.date >= start_date)
 
-    # --- Execute FILTERED queries ---
-    total_cash_sales = to_decimal(cash_sales_query.scalar())
-    total_ar_sales = to_decimal(ar_sales_query.scalar())
-    total_cash_purchases = to_decimal(cash_purchases_query.scalar())
-    total_ap_purchases = to_decimal(ap_purchases_query.scalar())
+    # Execute Queries
+    total_sales = to_decimal(cash_sales_query.scalar()) + to_decimal(ar_sales_query.scalar())
+    
+    # FIX: Total Purchases = Inventory Purchases + AP Bills
+    total_inventory_purchases = to_decimal(inventory_purchases_query.scalar())
+    total_ap_bills = to_decimal(ap_bills_query.scalar())
+    total_purchases = (total_inventory_purchases + total_ap_bills).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-    # 📊 COMBINED TOTALS (Cash + Credit)
-    total_sales = (total_cash_sales + total_ar_sales).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-    total_purchases = (total_cash_purchases + total_ap_purchases).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-
-    # --- 📊 CALCULATE TRUE NET INCOME FROM ACCOUNTING RECORDS ---
-    from routes.reports import aggregate_account_balances
-
-    end_date = None
-    if period != 'all':
-        end_date = today
-
+    # --- 5. Net Income (GL Aggregation) ---
+    end_date = today if period != 'all' else None
     agg = aggregate_account_balances(start_date, end_date)
 
     total_revenue = Decimal('0.00')
     total_expenses = Decimal('0.00')
     total_cogs = Decimal('0.00')
+    cogs_code = get_system_account_code('COGS')
 
-    try:
-        cogs_code = get_system_account_code('COGS')
-    except:
-        cogs_code = None
-
-    for acc_code, bal in agg.items():
+    for acc_code, data in agg.items():
+        bal_dec = to_decimal(data['net']) # FIX: Extract 'net'
         acct_rec = Account.query.filter_by(code=acc_code).first()
-        if not acct_rec:
-            continue
+        if not acct_rec: continue
 
-        bal_dec = to_decimal(bal)
         if acct_rec.type == 'Revenue':
-            # Revenue accounts have credit balances (negative in agg)
             total_revenue += abs(bal_dec)
         elif acct_rec.type == 'Expense':
             if cogs_code and acc_code == cogs_code:
@@ -236,154 +231,122 @@ def index():
             else:
                 total_expenses += abs(bal_dec)
 
-    # 📊 TRUE NET INCOME (Revenue - COGS - Expenses)
     gross_profit = total_revenue - total_cogs
     net_income = gross_profit - total_expenses
 
-    # --- Charting Logic (unchanged but Decimal safe) ---
+    # --- 6. Charts & Top Sellers ---
     sales_by_period = []
     labels = []
-
+    
+    # Chart Logic (Simplified for brevity, same logic as before)
     if period == '12':
         intervals = [today - timedelta(hours=i) for i in range(11, -1, -1)]
         for hour_start in intervals:
             hour_end = hour_start + timedelta(hours=1)
-            hour_total = to_decimal(db.session.query(func.coalesce(func.sum(Sale.total), 0))
-                                    .filter(Sale.created_at >= hour_start)
-                                    .filter(Sale.created_at < hour_end)
-                                    .filter(Sale.voided_at == None)
-                                    .scalar())
-            sales_by_period.append(hour_total)
+            val = db.session.query(func.coalesce(func.sum(Sale.total), 0)).filter(Sale.created_at >= hour_start, Sale.created_at < hour_end, Sale.voided_at.is_(None)).scalar()
+            sales_by_period.append(to_decimal(val))
             labels.append(hour_start.strftime('%I%p'))
     else:
-        if period == '30':
-            days = 30
-        elif period == '7':
-            days = 7
-        else:
-            days = 90
-
-        today_date = datetime.utcnow().date()
+        # Default to Daily (7, 30, 90 days)
+        days = 30 if period == '30' else (90 if period == 'all' else 7) # 'all' defaults to last 90 days for chart readability
+        today_date = today.date()
         last_n_days = [today_date - timedelta(days=i) for i in range(days - 1, -1, -1)]
         for day in last_n_days:
-            day_total = to_decimal(db.session.query(func.coalesce(func.sum(Sale.total), 0))
-                                   .filter(func.date(Sale.created_at) == day)
-                                   .filter(Sale.voided_at == None)
-                                   .scalar())
-            sales_by_period.append(day_total)
+            val = db.session.query(func.coalesce(func.sum(Sale.total), 0)).filter(func.date(Sale.created_at) == day, Sale.voided_at.is_(None)).scalar()
+            sales_by_period.append(to_decimal(val))
             labels.append(day.strftime('%b %d'))
+    
+    sales_by_day = [float(v) for v in sales_by_period]
 
-    # --- Top Sellers (unchanged) ---
     top_sellers = (
-        db.session.query(
-            Product.name,
-            func.sum(SaleItem.qty).label('total_qty_sold')
-        )
-            .join(SaleItem, Product.id == SaleItem.product_id)
-            .join(Sale, Sale.id == SaleItem.sale_id)
-            .filter(Sale.voided_at == None)
-            .group_by(Product.name)
-            .order_by(func.sum(SaleItem.qty).desc())
-            .limit(10)
-            .all()
+        db.session.query(Product.name, func.sum(SaleItem.qty).label('total_qty_sold'))
+        .join(SaleItem, Product.id == SaleItem.product_id)
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .filter(Sale.voided_at.is_(None))
+        .group_by(Product.name)
+        .order_by(func.sum(SaleItem.qty).desc())
+        .limit(10).all()
     )
 
-    # --- ✅ FIXED: DUE DATES DASHBOARD DATA (AR & AP Invoices) ---
-    from models import ARInvoice, APInvoice, Customer, Supplier
-
+    # --- 7. 📅 Upcoming Payments & Collections (FIXED) ---
+    
+    # A. AR Invoices (Receivables)
     ar_due = ARInvoice.query.filter(
         ARInvoice.status != 'Paid',
         ARInvoice.due_date.isnot(None),
-        ARInvoice.voided_at == None
-    ).order_by(ARInvoice.due_date.asc()).limit(10).all()
+        ARInvoice.voided_at.is_(None)
+    ).all()
 
+    # B. AP Invoices (Bills)
     ap_due = APInvoice.query.filter(
         APInvoice.status != 'Paid',
         APInvoice.due_date.isnot(None),
-        APInvoice.voided_at == None
-    ).order_by(APInvoice.due_date.asc()).limit(10).all()
+        APInvoice.voided_at.is_(None)
+    ).all()
+
+    # C. Credit Purchases (Inventory Payables) - NEW ADDITION
+    purchases_due = Purchase.query.filter(
+        Purchase.payment_type == 'Credit',
+        Purchase.status != 'Paid',
+        Purchase.due_date.isnot(None),
+        Purchase.voided_at.is_(None)
+    ).all()
 
     due_items = []
-    today_date = today.date()  # Convert to date for comparison
+    today_date = today.date()
 
-    # Process AR Invoices
+    # Helper function to process items
+    def add_due_item(item, type_label, party_name, number, url_endpoint, direction):
+        balance = to_decimal(item.total) - to_decimal(item.paid)
+        if balance <= Decimal('0.00'): return
+
+        due_date_obj = item.due_date.date() if hasattr(item.due_date, 'date') else item.due_date
+        days_until_due = (due_date_obj - today_date).days
+        urgency = 'overdue' if days_until_due < 0 else ('due_soon' if days_until_due <= 7 else 'upcoming')
+
+        due_items.append({
+            'type': type_label,
+            'id': item.id,
+            'number': number,
+            'party': party_name,
+            'amount': balance,
+            'due_date': item.due_date,
+            'days_until_due': days_until_due,
+            'urgency': urgency,
+            'description': getattr(item, 'description', '') or 'Credit Purchase',
+            'url': url_for(url_endpoint, invoice_id=item.id) if 'invoice' in url_endpoint else url_for('core.purchases'), 
+            'direction': direction
+        })
+
+    # Process all lists
     for inv in ar_due:
-        # ✅ FIX: Handle both date and datetime objects
-        if inv.due_date:
-            due_date_obj = inv.due_date.date() if hasattr(inv.due_date, 'date') else inv.due_date
-            days_until_due = (due_date_obj - today_date).days
-        else:
-            days_until_due = 999
-
-        balance = to_decimal(inv.total) - to_decimal(inv.paid)
-
-        if balance <= Decimal('0.00'):
-            continue
-
-        urgency = 'overdue' if days_until_due < 0 else ('due_soon' if days_until_due <= 7 else 'upcoming')
-
-        due_items.append({
-            'type': 'AR Invoice',
-            'id': inv.id,
-            'number': inv.invoice_number or f"AR-{inv.id}",
-            'party': inv.customer.name if inv.customer else 'N/A',
-            'amount': balance,
-            'due_date': inv.due_date,
-            'days_until_due': days_until_due,
-            'urgency': urgency,
-            'description': inv.description or '',
-            'url': url_for('ar_ap.billing_invoices'),
-            'direction': 'receivable'
-        })
-
-    # Process AP Invoices
+        add_due_item(inv, 'AR Invoice', inv.customer.name if inv.customer else 'N/A', inv.invoice_number or f"AR-{inv.id}", 'ar_ap.view_ar_invoice', 'receivable')
+    
     for inv in ap_due:
-        # ✅ FIX: Handle both date and datetime objects
-        if inv.due_date:
-            due_date_obj = inv.due_date.date() if hasattr(inv.due_date, 'date') else inv.due_date
-            days_until_due = (due_date_obj - today_date).days
-        else:
-            days_until_due = 999
+        add_due_item(inv, 'AP Invoice', inv.supplier.name if inv.supplier else 'N/A', inv.invoice_number or f"AP-{inv.id}", 'ar_ap.view_ap_invoice', 'payable')
 
-        balance = to_decimal(inv.total) - to_decimal(inv.paid)
+    for p in purchases_due:
+        # FIX: Add Credit Purchases to the list
+        add_due_item(p, 'Purchase (Credit)', p.supplier, f"PO-{p.id}", 'core.purchases', 'payable')
 
-        if balance <= Decimal('0.00'):
-            continue
-
-        urgency = 'overdue' if days_until_due < 0 else ('due_soon' if days_until_due <= 7 else 'upcoming')
-
-        due_items.append({
-            'type': 'AP Invoice',
-            'id': inv.id,
-            'number': inv.invoice_number or f"AP-{inv.id}",
-            'party': inv.supplier.name if inv.supplier else 'N/A',
-            'amount': balance,
-            'due_date': inv.due_date,
-            'days_until_due': days_until_due,
-            'urgency': urgency,
-            'description': inv.description or '',
-            'url': url_for('ar_ap.ap_invoices'),
-            'direction': 'payable'
-        })
-
-    # Sort by due date
+    # Sort: Overdue first, then Due Soon, then by days
     due_items.sort(key=lambda x: (x['urgency'] != 'overdue', x['urgency'] != 'due_soon', x['days_until_due']))
 
     overdue_items = [item for item in due_items if item['urgency'] == 'overdue']
     due_soon_items = [item for item in due_items if item['urgency'] == 'due_soon']
     upcoming_items = [item for item in due_items if item['urgency'] == 'upcoming'][:5]
-    sales_by_day = [float(v) for v in sales_by_period]
-
 
     return render_template(
         'index.html',
         products=products,
         low_stock=low_stock,
-        total_sales=total_sales,  # Decimal
-        total_purchases=total_purchases,  # Decimal
-        net_income=net_income,  # Decimal
-        gross_profit=gross_profit,  # Decimal
-        total_inventory_value=total_inventory_value,  # Decimal
+        total_sales=total_sales,
+        total_purchases=total_purchases,
+        net_income=net_income,
+        gross_profit=gross_profit,
+        total_revenue=total_revenue,
+        total_expenses=total_expenses,
+        total_inventory_value=total_inventory_value,
         products_in_stock=products_in_stock,
         labels=labels,
         sales_by_day=sales_by_day,
