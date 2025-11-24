@@ -150,7 +150,11 @@
           </a>
       </div>
 
-      {% set ar_ap_active = request.endpoint in [
+      {# Split AR/AP collapse logic:
+         - ar_ap_collapse_active controls whether the submenu is shown (include billing_invoices so the submenu opens when billing invoices is active)
+         - ar_ap_parent_active controls whether the parent header is visually marked active (exclude billing_invoices so the top-level Billing Invoices tab does not also highlight the parent)
+      #}
+      {% set ar_ap_collapse_active = request.endpoint in [
           'reports.ar_aging', 
           'reports.ap_aging', 
           'ar_ap.credit_memos',
@@ -161,10 +165,21 @@
           'ar_ap.recurring_bills',
           'ar_ap.billing_invoices'
       ] %}
-      <a class="text-white {% if ar_ap_active %}active{% endif %}" data-bs-toggle="collapse" href="#arApSubmenu" role="button" aria-expanded="{% if ar_ap_active %}true{% else %}false{% endif %}" aria-controls="arApSubmenu">
+      {% set ar_ap_parent_active = request.endpoint in [
+          'reports.ar_aging', 
+          'reports.ap_aging', 
+          'ar_ap.credit_memos',
+          'ar_ap.customers',
+          'ar_ap.suppliers',
+          'ar_ap.ar_invoices',
+          'ar_ap.ap_invoices',
+          'ar_ap.recurring_bills'
+      ] %}
+
+      <a class="text-white {% if ar_ap_parent_active %}active{% endif %}" data-bs-toggle="collapse" href="#arApSubmenu" role="button" aria-expanded="{% if ar_ap_collapse_active %}true{% else %}false{% endif %}" aria-controls="arApSubmenu">
         <i class="bi bi-people me-2"></i> Receivables & Payables
       </a>
-      <div class="collapse {% if ar_ap_active %}show{% endif %}" id="arApSubmenu">
+      <div class="collapse {% if ar_ap_collapse_active %}show{% endif %}" id="arApSubmenu">
           
           <h6 class="text-white-50 px-3 mt-2 mb-1 ms-3" style="font-size: 0.8rem;">ENTITIES</h6> 
           

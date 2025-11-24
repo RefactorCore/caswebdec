@@ -193,7 +193,7 @@
                     <!-- ✅ UPDATED: VAT Toggle at the top for better UX -->
                     <div class="mb-3">
                         <div class="form-check form-switch">
-                            <input class="form-check-input" type="checkbox" name="is_vatable" value="true" id="apIsVatable" checked onchange="toggleAPVatCalculation()">
+                            <input class="form-check-input" type="checkbox" name="is_vatable" value="true" id="apIsVatable" onchange="toggleAPVatCalculation()">
                             <label class="form-check-label" for="apIsVatable">
                                 <strong>This invoice is VATable (12% VAT)</strong>
                             </label>
@@ -337,6 +337,7 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // ✅ Void AP invoice function with payment check
+// ✅ Void AP invoice function with payment check
 function setVoidAPInvoiceTarget(actionUrl, targetName, paidAmount) {
     document.getElementById('voidAPInvoiceForm').action = actionUrl;
     document.getElementById('voidAPInvoiceTargetName').textContent = targetName;
@@ -346,11 +347,20 @@ function setVoidAPInvoiceTarget(actionUrl, targetName, paidAmount) {
     const submitBtn = document.getElementById('voidAPInvoiceSubmitBtn');
     
     if (paidAmount > 0) {
+        // Change: Show warning but ALLOW submission
         warningDiv.classList.remove('d-none');
-        submitBtn.disabled = true;
+        warningDiv.innerHTML = `<i class="bi bi-exclamation-triangle-fill me-2"></i> 
+                                <strong>Warning:</strong> This invoice has active payments of ₱${parseFloat(paidAmount).toLocaleString('en-US', {minimumFractionDigits: 2})}. 
+                                <br>Voiding this invoice will <strong>automatically void/reverse</strong> these payments.`;
+        submitBtn.disabled = false; // Enable the button!
+        submitBtn.classList.add('btn-warning'); // Optional: change color to warn user
+        submitBtn.classList.remove('btn-danger');
     } else {
+        // Normal void
         warningDiv.classList.add('d-none');
         submitBtn.disabled = false;
+        submitBtn.classList.add('btn-danger');
+        submitBtn.classList.remove('btn-warning');
     }
 }
 

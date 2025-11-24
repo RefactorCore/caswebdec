@@ -2,7 +2,6 @@
 {% block content %}
 <div class="container-fluid px-4 py-3">
 
-  <!-- Header -->
   <div class="d-flex justify-content-between align-items-center mb-3">
     <h2 class="mb-0">📦 Purchase Records</h2>
     <a href="{{ url_for('core.purchase') }}" class="btn btn-primary shadow-sm">
@@ -10,7 +9,6 @@
     </a>
   </div>
 
-  <!-- Filters / Search -->
   <div class="card mb-3 shadow-sm border-0">
     <div class="card-body d-flex flex-wrap gap-3 align-items-center">
       <div class="flex-grow-1">
@@ -27,7 +25,6 @@
     </div>
   </div>
 
-  <!-- Table -->
   <div class="card shadow-sm border-0">
     <div class="table-responsive">
       <table class="table align-middle table-hover mb-0" id="purchaseTable">
@@ -69,7 +66,7 @@
                             class="btn btn-outline-danger" 
                             data-bs-toggle="modal"
                             data-bs-target="#voidModal"
-                            onclick="setVoidTarget('{{ url_for('void.void_purchase', purchase_id=p.id) }}', 'Purchase #{{ p.id }}')">
+                            onclick="setVoidTarget('{{ url_for('void.void_purchase', purchase_id=p.id) }}', 'Purchase #{{ p.id }}', {{ p.paid | num }})">
                       <i class="bi bi-x-circle"></i> Void
                     </button>
                   {% endif %}
@@ -84,21 +81,19 @@
     </div>
   </div>
 
-  <!-- Summary Footer -->
   {% if purchases %}
   <div class="card mt-4 shadow-sm border-0">
     <div class="card-body text-end">
       <h5 class="mb-0">
-        <strong>Total Purchases:</strong> ₱{{ (purchases|sum(attribute='total')) | money }}
+        <strong>Total Purchases:</strong> ₱{{ total_purchases | money }}
         &nbsp; | &nbsp;
-        <strong>Total VAT:</strong> ₱{{ (purchases|sum(attribute='vat')) | money }}
+        <strong>Total VAT:</strong> ₱{{ total_vat | money }}
       </h5>
     </div>
   </div>
   {% endif %}
 </div>
 
-<!-- Void Confirmation Modal -->
 <div class="modal fade" id="voidModal" tabindex="-1">
   <div class="modal-dialog">
     <div class="modal-content">
@@ -113,6 +108,11 @@
           <div class="alert alert-warning">
             <strong>Warning:</strong> This will remove inventory lots and reverse all accounting entries.
           </div>
+          
+          <div id="voidPaymentWarning" class="alert alert-danger d-none">
+            <strong>Error:</strong> Cannot void purchase with active payments. Please void the payments inside the "View" page first.
+          </div>
+
           <p>You are about to void: <strong id="voidTargetName"></strong></p>
           <div class="mb-3">
             <label class="form-label"><strong>Void Reason *</strong></label>
@@ -121,7 +121,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-          <button type="submit" class="btn btn-danger">
+          <button type="submit" class="btn btn-danger" id="voidSubmitBtn">
             <i class="bi bi-x-circle me-1"></i> Void Purchase
           </button>
         </div>
@@ -130,11 +130,23 @@
   </div>
 </div>
 
-<!-- Scripts -->
 <script>
-  function setVoidTarget(actionUrl, targetName) {
+  // UPDATE 4: Updated function to accept paidAmount and toggle UI state
+  function setVoidTarget(actionUrl, targetName, paidAmount) {
     document.getElementById('voidForm').action = actionUrl;
     document.getElementById('voidTargetName').textContent = targetName;
+
+    const warningDiv = document.getElementById('voidPaymentWarning');
+    const submitBtn = document.getElementById('voidSubmitBtn');
+
+    // If there is any paid amount, show warning and disable button
+    if (paidAmount > 0) {
+      warningDiv.classList.remove('d-none');
+      submitBtn.disabled = true;
+    } else {
+      warningDiv.classList.add('d-none');
+      submitBtn.disabled = false;
+    }
   }
 
   // 🔍 Search filter
