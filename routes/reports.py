@@ -628,162 +628,162 @@ def ap_aging():
     return render_template('ap_aging.html', aging_data=aging_data, totals=totals)
 
 # Replace the existing stock_card route with this implementation
-# Replace the existing stock_card route with this implementation
 @reports_bp.route('/stock-card/<int:product_id>')
 @login_required
 @role_required('Admin', 'Accountant')
 def stock_card(product_id):
     """Generates an inventory stock card for a specific product."""
-    # Local imports to avoid circulars at module import time
     from models import ARInvoiceItem, InventoryMovementItem, InventoryMovement, Branch
 
     product = Product.query.get_or_404(product_id)
 
-    # Gather transaction sources
     sales = SaleItem.query.join(Sale).filter(SaleItem.product_id == product.id).all()
     purchases = PurchaseItem.query.filter_by(product_id=product.id).all()
     adjustments = StockAdjustment.query.filter_by(product_id=product.id).all()
     ar_invoice_items = ARInvoiceItem.query.join(ARInvoice).filter(ARInvoiceItem.product_id == product.id).all()
-
-    # Inventory movements (receive/transfer)
     movement_items = InventoryMovementItem.query.join(InventoryMovement).filter(InventoryMovementItem.product_id == product.id).all()
 
     transactions = []
 
-    # POS Sales
+    # --- 1. SALES ---
     for s in sales:
         is_voided = getattr(s.sale, 'voided_at', None) is not None
+        
+        # Always add the Original Sale (Out)
         transactions.append({
             'date': s.sale.created_at,
-            'type': '[VOID] Sale (POS)' if is_voided else 'Sale (POS)',
+            'type': f'Sale (POS) #{s.sale.id}' + (' [VOIDED]' if is_voided else ''),
             'ref_id': s.sale_id,
-            'qty_in': s.qty if is_voided else 0,
-            'qty_out': 0 if is_voided else s.qty,
+            'qty_in': 0,
+            'qty_out': s.qty, # Item went out
             'cost': getattr(s, 'cogs', None) or product.cost_price,
-            'voided': is_voided,
-            'void_reason': s.sale.void_reason if is_voided else None
+            'voided': is_voided
         })
 
-    # Purchases
+        # If voided, add a SECOND transaction for the Return (In)
+        if is_voided:
+            transactions.append({
+                'date': s.sale.voided_at or s.sale.created_at, # Use void date if available
+                'type': f'Void Reversal (Sale #{s.sale.id})',
+                'ref_id': s.sale_id,
+                'qty_in': s.qty, # Item came back in
+                'qty_out': 0,
+                'cost': getattr(s, 'cogs', None) or product.cost_price,
+                'voided': False # This specific line is the "fix", not the voided line itself
+            })
+
+    # --- 2. PURCHASES ---
     for p in purchases:
         is_voided = getattr(p.purchase, 'voided_at', None) is not None
+        
+        # Always add the Original Purchase (In)
         transactions.append({
             'date': p.purchase.created_at,
-            'type': '[VOID] Purchase' if is_voided else 'Purchase',
+            'type': f'Purchase #{p.purchase.id}' + (' [VOIDED]' if is_voided else ''),
             'ref_id': p.purchase_id,
-            'qty_in': 0 if is_voided else p.qty,
-            'qty_out': p.qty if is_voided else 0,
+            'qty_in': p.qty, # Item came in
+            'qty_out': 0,
             'cost': p.unit_cost,
-            'voided': is_voided,
-            'void_reason': p.purchase.void_reason if is_voided else None
+            'voided': is_voided
         })
+        
+        # If voided, add a SECOND transaction for the Removal (Out)
+        if is_voided:
+            transactions.append({
+                'date': p.purchase.voided_at or p.purchase.created_at,
+                'type': f'Void Reversal (Purchase #{p.purchase.id})',
+                'ref_id': p.purchase_id,
+                'qty_in': 0,
+                'qty_out': p.qty, # Item removed
+                'cost': p.unit_cost,
+                'voided': False
+            })
 
-    # Stock Adjustments
+    # --- 3. ADJUSTMENTS ---
     for adj in adjustments:
         is_voided = adj.voided_at is not None
-        if is_voided:
-            # reverse direction on void
-            qty_in = abs(adj.quantity_changed) if adj.quantity_changed < 0 else 0
-            qty_out = adj.quantity_changed if adj.quantity_changed > 0 else 0
-            transaction_type = f'[VOID] Adjustment ({adj.reason})'
-        else:
-            qty_in = adj.quantity_changed if adj.quantity_changed > 0 else 0
-            qty_out = abs(adj.quantity_changed) if adj.quantity_changed < 0 else 0
-            transaction_type = f'Adjustment ({adj.reason})'
-
+        
+        # Determine direction of original adjustment
+        orig_qty_in = adj.quantity_changed if adj.quantity_changed > 0 else 0
+        orig_qty_out = abs(adj.quantity_changed) if adj.quantity_changed < 0 else 0
+        
         transactions.append({
             'date': adj.created_at,
-            'type': transaction_type,
+            'type': f'Adjustment #{adj.id} ({adj.reason})' + (' [VOIDED]' if is_voided else ''),
             'ref_id': adj.id,
-            'qty_in': qty_in,
-            'qty_out': qty_out,
+            'qty_in': orig_qty_in,
+            'qty_out': orig_qty_out,
             'cost': product.cost_price,
-            'voided': is_voided,
-            'void_reason': adj.void_reason if is_voided else None
+            'voided': is_voided
         })
 
-    # Billing / AR invoice items (treated like sales)
+        if is_voided:
+            # Reverse it
+            transactions.append({
+                'date': adj.voided_at or adj.created_at,
+                'type': f'Void Reversal (Adj #{adj.id})',
+                'ref_id': adj.id,
+                'qty_in': orig_qty_out, # Swap In/Out
+                'qty_out': orig_qty_in,
+                'cost': product.cost_price,
+                'voided': False
+            })
+
+    # --- 4. AR INVOICES ---
     for ar_item in ar_invoice_items:
         is_voided = getattr(ar_item.ar_invoice, 'voided_at', None) is not None
         invoice_num = ar_item.ar_invoice.invoice_number or f"AR-{ar_item.ar_invoice.id}"
+        
+        # Original (Out)
         transactions.append({
             'date': ar_item.ar_invoice.date,
-            'type': f'[VOID] Billing Invoice - {invoice_num}' if is_voided else f'Billing Invoice - {invoice_num}',
+            'type': f'Billing Invoice {invoice_num}' + (' [VOIDED]' if is_voided else ''),
             'ref_id': ar_item.ar_invoice_id,
-            'qty_in': ar_item.qty if is_voided else 0,
-            'qty_out': 0 if is_voided else ar_item.qty,
+            'qty_in': 0,
+            'qty_out': ar_item.qty,
             'cost': (to_decimal(ar_item.cogs) / Decimal(ar_item.qty)) if (getattr(ar_item, 'cogs', None) and ar_item.qty) else product.cost_price,
-            'voided': is_voided,
-            'void_reason': ar_item.ar_invoice.void_reason if is_voided else None
+            'voided': is_voided
         })
+        
+        # Reversal (In)
+        if is_voided:
+             transactions.append({
+                'date': ar_item.ar_invoice.voided_at or ar_item.ar_invoice.date,
+                'type': f'Void Reversal (Inv {invoice_num})',
+                'ref_id': ar_item.ar_invoice_id,
+                'qty_in': ar_item.qty,
+                'qty_out': 0,
+                'cost': (to_decimal(ar_item.cogs) / Decimal(ar_item.qty)) if (getattr(ar_item, 'cogs', None) and ar_item.qty) else product.cost_price,
+                'voided': False
+            })
 
-    # Inventory Movements (receive / transfer)
-    # Inventory Movements (receive / transfer)
+    # --- 5. MOVEMENTS (Transfers) ---
     for mi in movement_items:
         m = mi.movement
-        m_date = getattr(m, 'created_at', datetime.utcnow())
-        is_voided = False  # InventoryMovement model currently doesn't have void fields; adapt if you add them
+        transactions.append({
+            'date': getattr(m, 'created_at', datetime.utcnow()),
+            'type': f'Movement: {m.movement_type.title()} (#{m.id})',
+            'ref_id': m.id,
+            'qty_in': mi.quantity if m.movement_type == 'receive' else 0,
+            'qty_out': mi.quantity if m.movement_type == 'transfer' else 0,
+            'cost': mi.unit_cost,
+            'voided': False
+        })
 
-        if m.movement_type == 'receive':
-            # Receive -> incoming row only
-            transactions.append({
-                'date': m_date,
-                'type': f'Movement: Receive (#{m.id})',
-                'ref_id': m.id,
-                'qty_in': mi.quantity,
-                'qty_out': 0,
-                'cost': mi.unit_cost,
-                'voided': is_voided,
-                'void_reason': None,
-                'from_branch_id': m.from_branch_id,
-                'to_branch_id': m.to_branch_id
-            })
-
-        elif m.movement_type == 'transfer':
-            # Transfer -> outgoing row only (Qty Out). Do NOT set qty_in here.
-            # Use from_branch if available to indicate the source of the outflow.
-            from_branch_name = m.from_branch.name if getattr(m, 'from_branch', None) else None
-            transactions.append({
-                'date': m_date,
-                'type': f'Transfer Out (#{m.id}) {from_branch_name or ""}',
-                'ref_id': m.id,
-                'qty_in': 0,
-                'qty_out': mi.quantity,
-                'cost': mi.unit_cost,
-                'voided': is_voided,
-                'void_reason': None,
-                'from_branch_id': m.from_branch_id,
-                'to_branch_id': m.to_branch_id
-            })
-
-        else:
-            # Fallback: unknown movement type — record as incoming by default
-            transactions.append({
-                'date': m_date,
-                'type': f'Movement: {m.movement_type or "Unknown"} (#{m.id})',
-                'ref_id': m.id,
-                'qty_in': mi.quantity,
-                'qty_out': 0,
-                'cost': mi.unit_cost,
-                'voided': is_voided,
-                'void_reason': None,
-                'from_branch_id': m.from_branch_id,
-                'to_branch_id': m.to_branch_id
-            })
-
-    # Sort ascending by date (oldest first)
+    # Sort by date
     transactions.sort(key=lambda x: x['date'] or datetime.utcnow())
 
-    # Compute net delta (non-voided transactions)
-    net_delta = sum((t.get('qty_in', 0) - t.get('qty_out', 0)) for t in transactions if not t.get('voided', False))
+    # --- CALCULATION ---
+    # Now, net_delta will correctly include the Original (+) and Void (-) actions, 
+    # resulting in a Net 0 change for voided transactions.
+    net_delta = sum((t.get('qty_in', 0) - t.get('qty_out', 0)) for t in transactions)
 
     current_quantity = product.quantity or 0
     opening_balance = int(current_quantity - net_delta)
 
-    # Build report rows: opening balance then transactions with running balance
     report_transactions = []
-
     first_date = transactions[0]['date'] if transactions else datetime.utcnow()
+    
     report_transactions.append({
         'date': first_date - timedelta(seconds=1),
         'type': 'Opening Balance',
@@ -792,28 +792,15 @@ def stock_card(product_id):
         'qty_out': abs(opening_balance) if opening_balance < 0 else 0,
         'cost': product.cost_price,
         'balance': opening_balance,
-        'voided': False,
-        'void_reason': None
+        'voided': False
     })
 
     running_balance = opening_balance
 
     for t in transactions:
-        # apply transaction to running balance (voided txns are recorded as their displayed qty_in/qty_out)
         running_balance += (t.get('qty_in', 0) - t.get('qty_out', 0))
-        # copy keys we need in template
-        row = {
-            'date': t['date'],
-            'type': t['type'],
-            'ref_id': t['ref_id'],
-            'qty_in': t.get('qty_in', 0),
-            'qty_out': t.get('qty_out', 0),
-            'cost': t.get('cost', product.cost_price),
-            'balance': running_balance,
-            'voided': t.get('voided', False),
-            'void_reason': t.get('void_reason')
-        }
-        report_transactions.append(row)
+        t['balance'] = running_balance
+        report_transactions.append(t)
 
     return render_template('stock_card.html', product=product, transactions=report_transactions)
 

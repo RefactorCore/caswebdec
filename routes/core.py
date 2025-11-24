@@ -15,6 +15,7 @@ from .utils import log_action
 from extensions import limiter
 from routes.sku_utils import generate_sku
 from routes.fifo_utils import create_inventory_lot, consume_inventory_fifo
+from werkzeug.routing import BuildError
 
 from decimal import Decimal, ROUND_HALF_UP, getcontext, InvalidOperation
 getcontext().prec = 28
@@ -297,24 +298,145 @@ def index():
 
     # Helper function to process items
     def add_due_item(item, type_label, party_name, number, url_endpoint, direction):
-        balance = to_decimal(item.total) - to_decimal(item.paid)
-        if balance <= Decimal('0.00'): return
+        """
+        Helper to add a due item to the dashboard. Builds URLs safely and chooses sensible fallbacks.
 
-        due_date_obj = item.due_date.date() if hasattr(item.due_date, 'date') else item.due_date
-        days_until_due = (due_date_obj - today_date).days
-        urgency = 'overdue' if days_until_due < 0 else ('due_soon' if days_until_due <= 7 else 'upcoming')
+        Strategy:
+          1. Try the provided endpoint with common param names: invoice_id, id, then without params.
+          2. If that fails, inspect the original endpoint string to decide whether AR or AP should be prioritized.
+             - If the endpoint name clearly references AP (view_ap_invoice, ap-invoice, etc.) try AP view/list first.
+             - If it clearly references AR (view_ar_invoice, billing_invoice, etc.) try AR view/list first.
+             - If it's ambiguous but contains 'ar_ap', use the presence of 'ap' vs 'ar' tokens in the original name to decide.
+          3. If still unresolved, try a set of common fallbacks: ar_ap.billing_invoices, ar_ap.ap_invoices, core.purchases, core.index.
+          4. Final fallback: '#'.
+        """
+        from werkzeug.routing import BuildError
+        # compute balance and skip zero/negative
+        balance = to_decimal(getattr(item, 'total', 0)) - to_decimal(getattr(item, 'paid', 0))
+        if balance <= Decimal('0.00'):
+            return
+
+        # normalize due_date and compute days_until_due (defensive)
+        due_date_val = getattr(item, 'due_date', None)
+        try:
+            due_date_obj = due_date_val.date() if hasattr(due_date_val, 'date') and due_date_val else due_date_val
+        except Exception:
+            due_date_obj = due_date_val
+
+        today_date_local = today.date() if 'today' in globals() else datetime.utcnow().date()
+        try:
+            days_until_due = (due_date_obj - today_date_local).days if due_date_obj else None
+        except Exception:
+            days_until_due = None
+
+        url = '#'
+
+        def try_build(ep, param_name=None):
+            """Attempt to url_for; returns URL string or None on BuildError/other."""
+            try:
+                if param_name and hasattr(item, 'id'):
+                    return url_for(ep, **{param_name: item.id})
+                else:
+                    return url_for(ep)
+            except BuildError:
+                return None
+            except Exception:
+                return None
+
+        # 1) Try the exact endpoint passed by caller first (invoice_id, id, then no param)
+        if url_endpoint:
+            if isinstance(url_endpoint, str) and '.' in url_endpoint:
+                for param in ('invoice_id', 'id', None):
+                    built = try_build(url_endpoint, param)
+                    if built:
+                        url = built
+                        break
+            else:
+                built = try_build(url_endpoint, None)
+                if built:
+                    url = built
+
+        # 2) If unresolved, analyze the endpoint string to prefer AR vs AP
+        if url == '#':
+            ep_lower = (url_endpoint or '').lower()
+
+            # heuristics to detect AP vs AR intent from provided endpoint name
+            prefers_ap = any(tok in ep_lower for tok in ('view_ap_invoice', 'ap_invoice', 'ap-invoice', 'view_ap', '.view_ap'))
+            prefers_ar = any(tok in ep_lower for tok in ('view_ar_invoice', 'billing_invoice', 'billing_invoices', 'billing-invoices', 'view_ar', '.view_ar', 'billing_invoices'))
+
+            # If endpoint contains the combined blueprint 'ar_ap', we must still check which specific view was originally intended.
+            try:
+                if 'ar_ap' in ep_lower:
+                    if prefers_ap and not prefers_ar:
+                        # try AP view first then AP list
+                        built = try_build('ar_ap.view_ap_invoice', 'invoice_id') or try_build('ar_ap.ap_invoices', None)
+                        if built:
+                            url = built
+                    elif prefers_ar and not prefers_ap:
+                        # try AR view first then AR list
+                        built = try_build('ar_ap.view_ar_invoice', 'invoice_id') or try_build('ar_ap.billing_invoices', None)
+                        if built:
+                            url = built
+                    else:
+                        # ambiguous: attempt to preserve part of original endpoint name
+                        if 'ap_' in ep_lower or 'ap' in ep_lower and 'view_ap' in ep_lower:
+                            built = try_build('ar_ap.view_ap_invoice', 'invoice_id') or try_build('ar_ap.ap_invoices', None)
+                            if built:
+                                url = built
+                        # default fallback preference for AR if ambiguous
+                        if url == '#':
+                            built = try_build('ar_ap.view_ar_invoice', 'invoice_id') or try_build('ar_ap.billing_invoices', None)
+                            if built:
+                                url = built
+
+                # If endpoint hints at AP but not combined blueprint
+                elif prefers_ap:
+                    built = try_build('ar_ap.view_ap_invoice', 'invoice_id') or try_build('ar_ap.ap_invoices', None)
+                    if built:
+                        url = built
+
+                # If endpoint hints at AR but not combined blueprint
+                elif prefers_ar:
+                    built = try_build('ar_ap.view_ar_invoice', 'invoice_id') or try_build('ar_ap.billing_invoices', None)
+                    if built:
+                        url = built
+
+                # Purchase-specific hint
+                elif 'purchase' in ep_lower or 'purchases' in ep_lower:
+                    built = try_build('core.view_purchase', 'purchase_id') or try_build('core.purchases', None)
+                    if built:
+                        url = built
+
+                # final attempts: common list endpoints
+                if url == '#':
+                    for fallback in ('ar_ap.billing_invoices', 'ar_ap.ap_invoices', 'core.purchases', 'core.index'):
+                        built = try_build(fallback, None)
+                        if built:
+                            url = built
+                            break
+            except Exception:
+                # keep url as '#'
+                url = '#'
+
+        # determine urgency and ensure days_until_due integer for template
+        if days_until_due is None:
+            urgency = 'upcoming'
+            days_until_due_val = 0
+        else:
+            urgency = 'overdue' if days_until_due < 0 else ('due_soon' if days_until_due <= 7 else 'upcoming')
+            days_until_due_val = days_until_due
 
         due_items.append({
             'type': type_label,
-            'id': item.id,
+            'id': getattr(item, 'id', None),
             'number': number,
             'party': party_name,
             'amount': balance,
-            'due_date': item.due_date,
-            'days_until_due': days_until_due,
+            'due_date': getattr(item, 'due_date', None),
+            'days_until_due': days_until_due_val,
             'urgency': urgency,
-            'description': getattr(item, 'description', '') or 'Credit Purchase',
-            'url': url_for(url_endpoint, invoice_id=item.id) if 'invoice' in url_endpoint else url_for('core.purchases'), 
+            'description': getattr(item, 'description', '') or getattr(item, 'supplier', '') or 'Credit Purchase',
+            'url': url,
             'direction': direction
         })
 
@@ -1007,9 +1129,33 @@ def purchase():
 
 
 @core_bp.route('/purchases')
+@login_required
+@role_required('Admin', 'Accountant')
 def purchases():
-    purchases = Purchase.query.order_by(Purchase.id.desc()).all()
-    return render_template('purchases.html', purchases=purchases)
+    page = request.args.get('page', 1, type=int)
+    per_page = 10
+    sort_by = request.args.get('sort_by', 'date_desc')
+    
+    query = Purchase.query
+    
+    if sort_by == 'date_desc':
+        query = query.order_by(Purchase.created_at.desc())
+    elif sort_by == 'date_asc':
+        query = query.order_by(Purchase.created_at.asc())
+    elif sort_by == 'total_desc':
+        query = query.order_by(Purchase.total.desc())
+    elif sort_by == 'total_asc':
+        query = query.order_by(Purchase.total.asc())
+    
+    purchases = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    # --- FIX START ---
+    # Only sum items that have NOT been voided (p.voided_at is None)
+    total_purchases = sum(p.total for p in purchases.items if not p.voided_at)
+    total_vat = sum(p.vat for p in purchases.items if not p.voided_at)
+    # --- FIX END ---
+    
+    return render_template('purchases.html', purchases=purchases, total_purchases=total_purchases, total_vat=total_vat, sort_by=sort_by)
 
 
 @core_bp.route('/purchase/cancel/<int:purchase_id>', methods=['POST'])
@@ -1060,10 +1206,18 @@ def cancel_purchase(purchase_id):
 
 
 @core_bp.route('/purchase/<int:purchase_id>')
+@login_required                                
+@role_required('Admin', 'Accountant', 'Cashier')
 def view_purchase(purchase_id):
+    from models import PurchaseItem, Payment
+
     purchase = Purchase.query.get_or_404(purchase_id)
     items = PurchaseItem.query.filter_by(purchase_id=purchase.id).all()
-    return render_template('purchase_view.html', purchase=purchase, items=items)
+
+    # Fetch payments related to this purchase so the template can show/void them
+    payments = Payment.query.filter_by(ref_type='Purchase', ref_id=purchase.id).order_by(Payment.date.desc()).all()
+
+    return render_template('purchase_view.html', purchase=purchase, items=items, payments=payments)
 
 
 @core_bp.route('/pos')
@@ -2134,7 +2288,7 @@ def adjust_stock():
         if quantity < 0:
             debit_account_code = get_system_account_code('Inventory Loss')
             credit_account_code = get_system_account_code('Inventory')
-            desc = f"Stock loss for {product.name}: {reason}"
+            desc = f"Stock Adjustment #{adjustment.id} - Loss for {product.name}: {reason}"
 
             try:
                 cogs_from_loss, _ = consume_inventory_fifo(
@@ -2151,7 +2305,7 @@ def adjust_stock():
         else:
             debit_account_code = get_system_account_code('Inventory')
             credit_account_code = get_system_account_code('Inventory Gain')
-            desc = f"Stock gain for {product.name}: {reason}"
+            desc = f"Stock Adjustment #{adjustment.id} - Gain for {product.name}: {reason}"
 
             create_inventory_lot(
                 product_id=product.id,

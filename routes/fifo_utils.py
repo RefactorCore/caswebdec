@@ -290,7 +290,7 @@ def reconcile_inventory_lots(product_id):
     }
 
 
-def reverse_inventory_consumption(sale_id=None, ar_invoice_id=None):
+def reverse_inventory_consumption(sale_id=None, ar_invoice_id=None, adjustment_id=None, movement_id=None):
     """
     Reverse FIFO inventory consumption for voided transactions.
     Restores inventory lots and deletes the consumption records.
@@ -298,19 +298,25 @@ def reverse_inventory_consumption(sale_id=None, ar_invoice_id=None):
     Args:
         sale_id: ID of the voided sale
         ar_invoice_id: ID of the voided AR invoice
+        adjustment_id: ID of the stock adjustment or movement (consume calls may have set adjustment_id)
+        movement_id: alias for adjustment_id when inventory movement used same field
 
     Returns:
         dict: Summary of reversed quantities by product
     """
-    # Find all inventory transactions for this sale/invoice
+    # Build query for affected InventoryTransaction rows
     query = InventoryTransaction.query
 
     if sale_id:
         query = query.filter(InventoryTransaction.sale_id == sale_id)
     elif ar_invoice_id:
         query = query.filter(InventoryTransaction.ar_invoice_id == ar_invoice_id)
+    elif adjustment_id:
+        query = query.filter(InventoryTransaction.adjustment_id == adjustment_id)
+    elif movement_id:
+        query = query.filter(InventoryTransaction.adjustment_id == movement_id)
     else:
-        raise ValueError("Must provide either sale_id or ar_invoice_id")
+        raise ValueError("Must provide either sale_id, ar_invoice_id, adjustment_id, or movement_id")
 
     transactions = query.all()
 
@@ -330,5 +336,18 @@ def reverse_inventory_consumption(sale_id=None, ar_invoice_id=None):
 
         # Delete the transaction record
         db.session.delete(trans)
+
+    # After restoration, sync Product.quantity for affected products
+    for pid in list(reversed_summary.keys()):
+        total_remaining = db.session.query(func.coalesce(func.sum(InventoryLot.quantity_remaining), 0)).filter(InventoryLot.product_id == pid).scalar() or 0
+        prod = Product.query.get(pid)
+        if prod:
+            prod.quantity = int(total_remaining)
+
+    # Flush so callers can rely on in-session state prior to commit
+    try:
+        db.session.flush()
+    except Exception:
+        pass
 
     return reversed_summary
