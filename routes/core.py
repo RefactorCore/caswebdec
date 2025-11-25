@@ -1567,20 +1567,46 @@ def api_sale():
             for cons_id, group in consignment_groups.items():
                 commission_rate = (group['consignment'].commission_rate or 0) / 100 if group['consignment'].commission_rate else 0
                 commission = (group['total'] * Decimal(str(commission_rate))).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+                
                 consignment_commission_total += commission
+                
+                consignment_sale = ConsignmentSale(
+                    consignment_id=cons_id,
+                    sale_id=sale.id,
+                    sale_date=sale.created_at,
+                    total_amount=group['total'],
+                    commission_rate=group['consignment'].commission_rate,
+                    commission_amount=commission,
+                    amount_due_to_supplier=(group['total'] - commission).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP),
+                    payment_status='Pending'
+                )
+                db.session.add(consignment_sale)
+                db.session.flush()  # Ensure ID is available for items
+                
+                # Create ConsignmentSaleItem records for each sold item in this consignment
+                for p in processed:
+                    if p['is_consignment'] and p['consignment_item'].consignment_id == cons_id:
+                        consignment_sale_item = ConsignmentSaleItem(
+                            consignment_sale_id=consignment_sale.id,
+                            consignment_item_id=p['consignment_item'].id,
+                            quantity_sold=p['qty'],
+                            unit_price=to_decimal(p['unit_price']),
+                            line_total=to_decimal(p['line_gross'])
+                        )
+                        db.session.add(consignment_sale_item)
 
         je_lines = []
 
         je_lines.append({'account_code': get_system_account_code('Cash'), 'debit': format(to_decimal(total_amount), '0.2f'), 'credit': "0.00"})
 
-        if consignment_commission_total > Decimal('0.00'):
+        if consignment_sales_total > Decimal('0.00'):
+            # Always include Commission Revenue line (even if $0) so it appears in reports
             je_lines.append({
                 'account_code': get_system_account_code('Consignment Commission Revenue'),
                 'debit': "0.00",
                 'credit': format(consignment_commission_total, '0.2f')
             })
-
-        if consignment_sales_total > Decimal('0.00'):
+            
             consignment_payable = (consignment_sales_total - consignment_commission_total).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
             je_lines.append({
                 'account_code': get_system_account_code('Consignment Payable'),

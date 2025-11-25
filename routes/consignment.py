@@ -393,7 +393,7 @@ def adjust_item(item_id):
 @login_required
 @role_required('Admin', 'Accountant')
 def remit_payment(consignment_id):
-    """Complete settlement: Return unsold items and remit payment to supplier"""
+    """Process remittance and handle item returns/retention."""
     consignment = ConsignmentReceived.query.get_or_404(consignment_id)
 
     try:
@@ -402,54 +402,82 @@ def remit_payment(consignment_id):
         reference_number = request.form.get('reference_number', '').strip()
         notes = request.form.get('notes', '').strip()
 
-        # Validate payment amount
-        if amount_paid <= Decimal('0.00'):
-            flash('Payment amount must be greater than zero.', 'danger')
-            return redirect(url_for('consignment.view_consignment', consignment_id=consignment_id))
+        # Get the items to be returned (JSON array of {'item_id': X, 'qty_returned': Y})
+        return_items_json = request.form.get('return_items_json', '[]')
+        import json
+        items_to_return_data = json.loads(return_items_json)
 
-        # Calculate totals (Decimal-safe)
+        # Calculate financial totals
         total_already_paid = to_decimal(db.session.query(func.coalesce(func.sum(ConsignmentRemittance.amount_paid), 0.0))\
             .filter(ConsignmentRemittance.consignment_id == consignment.id)\
             .scalar())
-
         amount_due = to_decimal(consignment.get_amount_due_to_supplier())
+
+        # Validate payment amount
+        if amount_paid < Decimal('0.00'):
+            flash('Payment amount cannot be negative.', 'danger')
+            return redirect(url_for('consignment.view_consignment', consignment_id=consignment_id))
+
         remaining_due = (amount_due - total_already_paid).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
-        # Warn if overpayment
+        # Warn if overpayment (Optional: keep this outside of transaction logic)
         if amount_paid > (remaining_due + Decimal('0.01')):
             flash(
                 f'⚠️ Warning: Payment amount (₱{amount_paid:,.2f}) exceeds remaining due (₱{remaining_due:,.2f}).',
                 'warning'
             )
 
-        # Calculate returns BEFORE modifying quantities
+        # ----------------------------------------------------
+        # 1. PROCESS ITEM RETURNS (MUST HAPPEN BEFORE STATUS CHECK)
+        # ----------------------------------------------------
         total_returned = 0
         items_being_returned = []
 
-        for item in consignment.items:
-            # Calculate available BEFORE any modifications
+        for item_data in items_to_return_data:
+            item_id = item_data.get('item_id')
+            qty_to_return = int(item_data.get('qty_returned', 0))
+
+            if qty_to_return <= 0:
+                continue
+
+            item = ConsignmentItem.query.get(item_id)
+            if not item:
+                continue
+                
+            # Calculate current available quantity BEFORE return update
             current_available = item.quantity_received - item.quantity_sold - item.quantity_returned - item.quantity_damaged
+            
+            if qty_to_return > current_available:
+                flash(f'Error: Cannot return {qty_to_return} of {item.product_name}. Only {current_available} available.', 'danger')
+                db.session.rollback()
+                return redirect(url_for('consignment.view_consignment', consignment_id=consignment_id))
+            
+            # Update returned quantity for the item (This updates the item object in memory/session)
+            item.quantity_returned += qty_to_return
+            total_returned += qty_to_return
 
-            if current_available > 0:
-                items_being_returned.append({
-                    'sku': item.sku,
-                    'name': item.product_name,
-                    'quantity': current_available,
-                    'retail_price': to_decimal(item.retail_price),
-                    'total_value': (to_decimal(item.retail_price) * to_decimal(current_available)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-                })
+            items_being_returned.append({
+                'sku': item.sku,
+                'name': item.product_name,
+                'quantity': qty_to_return,
+                'retail_price': to_decimal(item.retail_price),
+                'total_value': (to_decimal(item.retail_price) * to_decimal(qty_to_return)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+            })
 
-                # Set returned quantity explicitly
-                item.quantity_returned = item.quantity_received - item.quantity_sold - item.quantity_damaged
-                total_returned += current_available
+            log_action(
+                f'Returned {qty_to_return} units of {item.product_name} '
+                f'on settlement of {consignment.receipt_number}'
+            )
 
-                log_action(
-                    f'Auto-returned {current_available} units of {item.product_name} '
-                    f'on settlement of {consignment.receipt_number}'
-                )
-
-        # Create remittance record
-        settlement_notes = f"Returned {total_returned} unsold items. "
+        # ----------------------------------------------------
+        # 2. CREATE REMITTANCE RECORD (Flush to ensure DB knows about item updates)
+        # ----------------------------------------------------
+        settlement_notes = ""
+        if total_returned > 0:
+            settlement_notes += f"Returned {total_returned} items. "
+        
+        settlement_notes += f"Payment: ₱{amount_paid:,.2f}. "
+        
         if reference_number:
             settlement_notes = f"Ref: {reference_number}. " + settlement_notes
         if notes:
@@ -463,22 +491,46 @@ def remit_payment(consignment_id):
             created_by_id=current_user.id
         )
         db.session.add(remittance)
-        db.session.flush()
+        # Flush the session so the following query includes the item.quantity_returned updates
+        db.session.flush() 
 
-        # Update consignment status
+        # ----------------------------------------------------
+        # 3. FINAL STATUS CHECK (Uses the updated item quantities)
+        # ----------------------------------------------------
+        
+        # Recalculate total disposition using the updated item quantities in the session
+        total_disposed = db.session.query(
+            func.sum(ConsignmentItem.quantity_sold + ConsignmentItem.quantity_returned + ConsignmentItem.quantity_damaged)
+        ).filter(ConsignmentItem.consignment_id == consignment.id).scalar() or 0
+        
+        original_total_items = consignment.total_items
         new_total_paid = (total_already_paid + amount_paid).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
-        if new_total_paid >= (amount_due - Decimal('0.01')):
+        status_msg = f'✅ Remittance recorded.'
+        
+        if total_disposed >= original_total_items:
+            # Automatic Closure on full disposition
             consignment.status = 'Closed'
-            status_msg = '✅ Consignment fully settled and closed!'
-        else:
+            status_msg = f'✅ Consignment fully settled and CLOSED because all items ({original_total_items}) have been accounted for.'
+        
+        elif amount_paid > Decimal('0.00') and consignment.status == 'Active':
+            # If a payment is made, but it's not closed, mark it as partial.
             consignment.status = 'Partial'
-            status_msg = f'✅ Partial payment recorded. Remaining: ₱{(amount_due - new_total_paid):,.2f}'
+            status_msg = f'✅ Partial payment recorded. Remaining due: ₱{(amount_due - new_total_paid):,.2f}'
+        
+        elif amount_paid > Decimal('0.00') and consignment.status == 'Partial':
+            # Update flash message if status was already Partial
+            status_msg = f'✅ Remittance recorded. Remaining due: ₱{(amount_due - new_total_paid):,.2f}'
 
-        # Create journal entry (use formatted strings for entries_json amounts)
+        # ----------------------------------------------------
+        # 4. JOURNAL ENTRY & COMMIT
+        # ----------------------------------------------------
+        
         from models import JournalEntry
         from routes.utils import get_system_account_code
-        import json
 
+        commission_earned = (consignment.get_total_sold_value() - amount_due).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+        
         je_lines = [
             {
                 'account_code': get_system_account_code('Consignment Payable'),
@@ -492,6 +544,13 @@ def remit_payment(consignment_id):
             }
         ]
 
+        if commission_earned > Decimal('0.00'):
+            je_lines.append({
+                'account_code': get_system_account_code('Consignment Commission Revenue'),
+                'debit': "0.00",
+                'credit': format(commission_earned, '0.2f')
+            })
+
         journal_entry = JournalEntry(
             description=f'Settlement for {consignment.receipt_number}: Paid {consignment.supplier.name} ₱{amount_paid:,.2f}, Returned {total_returned} items',
             entries_json=json.dumps(je_lines)
@@ -500,16 +559,19 @@ def remit_payment(consignment_id):
 
         db.session.commit()
 
+        # ... (Logging and session flash messages remain the same) ...
+
         log_action(
-            f'Completed settlement for {consignment.receipt_number}: '
+            f'Completed remittance for {consignment.receipt_number}: '
             f'Paid ₱{amount_paid:,.2f}, Returned {total_returned} items. '
             f'Total paid: ₱{new_total_paid:,.2f} / ₱{amount_due:,.2f}'
         )
 
         flash(status_msg, 'success')
-        flash(f'📦 Returned {total_returned} unsold items to supplier.', 'info')
+        if total_returned > 0:
+             flash(f'📦 Returned {total_returned} unsold items to supplier.', 'info')
 
-        # Store settlement details in session for receipt (convert Decimals to floats/strings for JSON-serializable session)
+        # Store settlement details in session for receipt
         session['last_settlement'] = {
             'remittance_id': remittance.id,
             'consignment_id': consignment.id,

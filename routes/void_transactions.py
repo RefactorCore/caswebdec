@@ -2,7 +2,8 @@ from flask import Blueprint, request, flash, redirect, url_for, jsonify
 from flask_login import login_required, current_user
 from models import (db, Sale, Purchase, ARInvoice, APInvoice, Payment, 
                    JournalEntry, StockAdjustment, Product, InventoryLot, SaleItem, 
-                   InventoryTransaction, ARInvoiceItem)
+                   InventoryTransaction, ARInvoiceItem, ConsignmentSale, 
+                   ConsignmentItem, ConsignmentRemittance)
 from datetime import datetime
 import json
 from .decorators import role_required
@@ -44,7 +45,6 @@ def create_reversing_je(original_je, description_prefix, void_reason):
     for the Financial Reports to calculate a Net Zero balance.
     """
     try:
-        # Load original lines defensively
         try:
             original_entries = original_je.entries()
         except Exception:
@@ -53,7 +53,6 @@ def create_reversing_je(original_je, description_prefix, void_reason):
         reversed_entries = []
         for entry in original_entries:
             acct = entry.get('account_code')
-            # Some entries store amounts as strings when created; coerce safely
             debit = to_decimal(entry.get('debit', '0.00'))
             credit = to_decimal(entry.get('credit', '0.00'))
             
@@ -71,19 +70,17 @@ def create_reversing_je(original_je, description_prefix, void_reason):
         )
         db.session.add(reversing_je)
         
-        # Update description to show it was reversed, but DO NOT set voided_at
         original_je.description = f"{original_je.description} [REVERSED]"
         original_je.void_reason = f"Reversed by JE (Reason: {void_reason})"
 
         db.session.flush()
-
         return reversing_je
 
     except Exception as e:
         print(f"Error creating reversing JE: {e}")
         return None
 
-# --- 1. VOID SALE (Covers POS/Cash Sales) ---
+# --- 1. VOID SALE (Updated for Consignment & Inventory Fixes) ---
 @void_bp.route('/sale/<int:sale_id>', methods=['POST'])
 @login_required
 @role_required('Admin', 'Accountant', 'Cashier')
@@ -100,20 +97,67 @@ def void_sale(sale_id):
         return redirect(request.referrer or url_for('core.sales'))
     
     try:
-        # 1. Reverse Inventory (Restores Stock & Updates Product Qty)
-        # We rely solely on this function to fix inventory. 
-        # Removed the manual "for item in sale.items" loop to avoid Double Counting.
-        reverse_inventory_consumption(sale_id=sale.id)
+        # --- A. Consignment Payment Check ---
+        consignment_sale = ConsignmentSale.query.filter_by(sale_id=sale.id).first()
+        if consignment_sale and consignment_sale.payment_status == 'Paid':
+             flash('Cannot void sale: The consignment supplier has already been paid for these items. Please void the Remittance first.', 'danger')
+             return redirect(url_for('core.sales'))
+
+        # --- B. Reverse Inventory (Standard FIFO) ---
+        # We capture the result to know which products were actually restored
+        reversed_qtys_summary = reverse_inventory_consumption(sale_id=sale.id)
         
-        # 2. Reverse Financials
+        # --- C. Reverse Consignment Specifics ---
+        if consignment_sale:
+            for sale_item in sale.items:
+                # 1. Find the linked Consignment Item
+                # Try match by Product ID first
+                c_item = ConsignmentItem.query.filter_by(
+                    consignment_id=consignment_sale.consignment_id,
+                    sku=sale_item.sku
+                ).first()
+                
+                if c_item:
+                    qty = sale_item.qty
+                    
+                    # 2. Update Consignment Counts
+                    actual_reversal = min(c_item.quantity_sold, qty)
+                    c_item.quantity_sold -= actual_reversal
+                    
+                    # 3. Fix for "POS Product Not Reversed" (Issue #2)
+                    # If this item was NOT restored by FIFO reversal (likely because it had no lots),
+                    # we must manually increment the Product master quantity.
+                    product_id_key = sale_item.product_id
+                    if product_id_key and product_id_key not in reversed_qtys_summary:
+                        product = Product.query.get(product_id_key)
+                        if product:
+                            product.quantity += qty
+            
+            # Update status
+            consignment_sale.payment_status = 'Voided'
+
+            consignment = consignment_sale.consignment
+            total_sold = sum(item.quantity_sold for item in consignment.items)
+            total_returned = sum(item.quantity_returned for item in consignment.items)
+            total_received = consignment.total_items
+
+            if total_sold + total_returned >= total_received:
+                consignment.status = 'Closed'
+            elif total_sold > 0 or total_returned > 0:
+                consignment.status = 'Partial'
+            else:
+                consignment.status = 'Active'
+
+        # --- D. Reverse Financials ---
         original_je = JournalEntry.query.filter(
-            JournalEntry.description.like(f'%Sale #{sale.id}%')
-        ).filter(JournalEntry.voided_at.is_(None)).first()
+            JournalEntry.description.like(f'%Sale #{sale.id}%'),
+            JournalEntry.voided_at.is_(None)
+        ).first()
         
         if original_je:
             create_reversing_je(original_je, f'Sale #{sale.id} ({sale.document_number})', void_reason)
         
-        # 3. Mark Void
+        # --- E. Mark Sale Void ---
         sale.voided_at = datetime.utcnow()
         sale.voided_by = current_user.id
         sale.void_reason = void_reason
@@ -129,7 +173,6 @@ def void_sale(sale_id):
         flash(f'Error voiding sale: {str(e)}', 'danger')
     
     return redirect(url_for('core.sales'))
-
 
 # --- 2. VOID PURCHASE ---
 @void_bp.route('/purchase/<int:purchase_id>', methods=['POST'])
@@ -178,9 +221,6 @@ def void_purchase(purchase_id):
 
             product = Product.query.get(item.product_id)
             if product:
-                # Sync logic: It is safer to recalculate from remaining lots than to subtract manually
-                # But manual subtraction is acceptable here if consistent.
-                # To be absolutely safe, let's just subtract.
                 try:
                     product.quantity = max(0, int(product.quantity) - int(item.qty))
                 except Exception:
@@ -253,11 +293,8 @@ def void_ar_invoice(invoice_id):
             flash(f'Cannot void invoice. There are active payments totaling ₱{sum_active:,.2f}. Please void the payments first.', 'danger')
             return redirect(request.referrer or url_for('ar_ap.billing_invoices'))
         
-        # 1. Reverse Inventory (Handles Product Qty Update)
-        # Removed manual "for item in invoice.items" loop to prevent double addition.
         reverse_inventory_consumption(ar_invoice_id=invoice.id)
         
-        # 2. Financial Reversal
         original_je = JournalEntry.query.filter(
             JournalEntry.description.like(f'%Billing Invoice {invoice.invoice_number}%')
         ).filter(JournalEntry.voided_at.is_(None)).first()
@@ -289,11 +326,7 @@ def void_ar_invoice(invoice_id):
     
     return redirect(url_for('ar_ap.billing_invoices'))
 
-# ... (Keep existing AP Invoice, Payment, Stock Adj, and JE void functions below) ...
-# (They are unaffected by this specific fix, but make sure to include them if copying the whole file)
-
-# --- 4. VOID AP INVOICE ---
-# --- 4. VOID AP INVOICE (Updated to Auto-Void Payments) ---
+# --- 4. VOID AP INVOICE (Auto-Void Payments) ---
 @void_bp.route('/ap-invoice/<int:invoice_id>', methods=['POST'])
 @login_required
 @role_required('Admin', 'Accountant')
@@ -310,18 +343,14 @@ def void_ap_invoice(invoice_id):
         return redirect(request.referrer or url_for('ar_ap.ap_invoices'))
 
     try:
-        # 1. Fetch Active Payments
         active_payments = Payment.query.filter(
             Payment.ref_type.in_(['AP', 'APInvoice']),
             Payment.ref_id == invoice.id,
             Payment.voided_at.is_(None)
         ).all()
 
-        # 2. Auto-Void Linked Payments (Instead of blocking)
         if active_payments:
             for payment in active_payments:
-                # A. Find the Payment's Journal Entry
-                # Try common description patterns used in your system
                 original_payment_je = JournalEntry.query.filter(
                     JournalEntry.description.like(f'%Payment for AP #{payment.ref_id}%'),
                     JournalEntry.voided_at.is_(None)
@@ -333,18 +362,15 @@ def void_ap_invoice(invoice_id):
                         JournalEntry.voided_at.is_(None)
                     ).first()
 
-                # B. Reverse the Payment JE
                 if original_payment_je:
                     create_reversing_je(original_payment_je, f'Auto-Void Payment #{payment.id}', f'Linked to AP Void #{invoice.id}')
 
-                # C. Mark Payment as Voided
                 payment.voided_at = datetime.utcnow()
                 payment.voided_by = current_user.id
                 payment.void_reason = f"Auto-voided with AP Invoice #{invoice.id} ({void_reason})"
                 
                 log_action(f'Auto-voided Payment #{payment.id} due to AP Invoice #{invoice.id} void.')
 
-        # 3. Reverse the Invoice Financials
         original_je = JournalEntry.query.filter(
             JournalEntry.description.like(f'%AP Invoice #{invoice.id}%'),
             JournalEntry.voided_at.is_(None)
@@ -353,7 +379,6 @@ def void_ap_invoice(invoice_id):
         if original_je:
             create_reversing_je(original_je, f'AP Invoice #{invoice.id} ({invoice.invoice_number})', void_reason)
         
-        # 4. Mark Invoice as Voided
         invoice.voided_at = datetime.utcnow()
         invoice.voided_by = current_user.id
         invoice.void_reason = void_reason
@@ -578,6 +603,57 @@ def void_journal_entry(je_id):
         
     except Exception as e:
         db.session.rollback()
-        flash(f'Error voiding journal entry: {str(e)}', 'danger')
+        flash(f'Error voiding JE: {str(e)}', 'danger')
     
     return redirect(url_for('core.journal_entries'))
+
+# --- 8. VOID CONSIGNMENT REMITTANCE (For Fix #2) ---
+@void_bp.route('/consignment-remittance/<int:remittance_id>', methods=['POST'])
+@login_required
+@role_required('Admin', 'Accountant')
+def void_consignment_remittance(remittance_id):
+    remittance = ConsignmentRemittance.query.get_or_404(remittance_id)
+    
+    if remittance.voided_at:
+        flash('This remittance has already been voided.', 'warning')
+        return redirect(request.referrer)
+        
+    void_reason = request.form.get('void_reason', '').strip()
+    if not void_reason:
+        flash('Void reason is required.', 'danger')
+        return redirect(request.referrer)
+        
+    try:
+        original_je = JournalEntry.query.filter(
+            JournalEntry.description.like(f'%Settlement for {remittance.consignment.receipt_number}%'),
+            JournalEntry.voided_at.is_(None)
+        ).first()
+        
+        if original_je:
+            create_reversing_je(original_je, f'Remittance #{remittance.id}', void_reason)
+            
+        linked_sales = ConsignmentSale.query.filter_by(
+            consignment_id=remittance.consignment_id, 
+            payment_status='Paid'
+        ).all()
+        
+        count_reset = 0
+        for cs in linked_sales:
+            if cs.sale.created_at <= remittance.created_at:
+                cs.payment_status = 'Pending'
+                count_reset += 1
+        
+        remittance.voided_at = datetime.utcnow()
+        remittance.voided_by = current_user.id
+        remittance.void_reason = void_reason
+        
+        log_action(f'Voided Consignment Remittance #{remittance.id}. Sales reset: {count_reset}')
+        db.session.commit()
+        
+        flash(f'Remittance #{remittance.id} voided. {count_reset} sales marked back to Pending.', 'success')
+        
+    except Exception as e:
+        db.session.rollback()
+        flash(f'Error voiding remittance: {str(e)}', 'danger')
+        
+    return redirect(request.referrer)
