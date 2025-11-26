@@ -92,7 +92,7 @@ INDUSTRY_CATEGORIES = {
 
 def generate_sku(product_name, category=None, custom_sku=None, industry=None):
     """
-    Universal SKU generator for any retail business.
+    Universal SKU generator for any retail business. 
 
     Args:
         product_name: Name of the product
@@ -107,9 +107,9 @@ def generate_sku(product_name, category=None, custom_sku=None, industry=None):
     from datetime import datetime
     from models import Product
 
-    # 1. CUSTOM SKU: Validate and use if provided
+    # 1.  CUSTOM SKU: Validate and use if provided
     if custom_sku and custom_sku.strip():
-        custom_sku = custom_sku.strip().upper()
+        custom_sku = custom_sku.strip(). upper()
 
         # Validate format
         if not re.match(r'^[A-Z0-9-]+$', custom_sku):
@@ -119,7 +119,7 @@ def generate_sku(product_name, category=None, custom_sku=None, industry=None):
             raise ValueError("SKU is too long (max 64 characters)")
 
         # Check uniqueness
-        existing = Product.query.filter_by(sku=custom_sku).first()
+        existing = Product.query.filter_by(sku=custom_sku). first()
         if existing:
             raise ValueError(f"SKU '{custom_sku}' already exists for: {existing.name}")
 
@@ -131,37 +131,75 @@ def generate_sku(product_name, category=None, custom_sku=None, industry=None):
     else:
         prefix = auto_detect_category(product_name, industry)
 
-    # 3. GENERATE SEQUENTIAL NUMBER (robust)
-    # Use a regex to extract the numeric segment from existing SKUs
-    # Matches: PREFIX-12345 or PREFIX-00123-extra (captures the numeric block after first dash)
-    numeric_pattern = re.compile(rf'^{re.escape(prefix)}-(\d{{1,}})(?:$|-)')
-    candidates = Product.query.filter(Product.sku.like(f'{prefix}-%')).all()
-
-    max_num = 0
-    for p in candidates:
-        m = numeric_pattern.match(p.sku)
-        if m:
-            try:
-                n = int(m.group(1))
-                if n > max_num:
-                    max_num = n
-            except ValueError:
-                # ignore non-numeric matches
+    # ✅ FIX: Use simpler, more reliable SKU generation
+    max_retries = 5  # Increase retries
+    
+    for attempt in range(max_retries):
+        try:
+            # Get engine name to determine locking strategy
+            engine_name = db.session.bind. dialect.name
+            
+            # ✅ SIMPLIFIED: Just get the highest number for this prefix
+            if engine_name == 'sqlite':
+                # SQLite: Simple query without locking
+                existing_skus = db.session.query(Product.sku).filter(
+                    Product.sku. like(f'{prefix}-%')
+                ).all()
+            else:
+                # PostgreSQL/MySQL/MariaDB: Use SELECT FOR UPDATE
+                existing_skus = db.session.query(Product. sku).filter(
+                    Product.sku.like(f'{prefix}-%')
+                ). with_for_update().all()
+            
+            # Extract numbers from existing SKUs
+            max_num = 0
+            # ✅ FIX: Simplified regex - match PREFIX-DIGITS at end of string
+            pattern = re.compile(rf'^{re. escape(prefix)}-(\d+)$')
+            
+            for (sku,) in existing_skus:
+                match = pattern.match(sku)
+                if match:
+                    try:
+                        num = int(match.group(1))
+                        if num > max_num:
+                            max_num = num
+                    except ValueError:
+                        continue
+            
+            # Generate next SKU
+            next_num = max_num + 1
+            new_sku = f"{prefix}-{next_num:05d}"
+            
+            # ✅ CRITICAL: Double-check uniqueness before returning
+            if not Product.query. filter_by(sku=new_sku).first():
+                return new_sku
+            else:
+                # SKU already exists (race condition), retry
+                if attempt < max_retries - 1:
+                    continue
+                    
+        except Exception as e:
+            db.session.rollback()
+            if attempt < max_retries - 1:
                 continue
-
-    next_num = max_num + 1
-
-    # 4. FORMAT SKU
-    new_sku = f"{prefix}-{next_num:05d}"
-
-    # 5. FINAL UNIQUENESS CHECK (rare)
-    if Product.query.filter_by(sku=new_sku).first():
-        # Collision detected (race or unexpected existing value)
-        # Fallback: append timestamp suffix to preserve uniqueness
-        timestamp = datetime.now().strftime('%Y%m%d%H%M%S')
-        new_sku = f"{prefix}-{next_num:05d}-{timestamp}"
-
-    return new_sku
+            # Last attempt failed, break to fallback
+            break
+    
+    # ✅ FALLBACK: If all retries fail, use a shorter unique identifier
+    # Use microseconds (6 digits) + random 3 digits instead of full timestamp
+    from random import randint
+    microseconds = datetime.now().strftime('%f')  # 6 digits
+    random_suffix = f"{randint(100, 999)}"
+    fallback_sku = f"{prefix}-{microseconds}{random_suffix}"
+    
+    # Ensure fallback is also unique
+    attempt_count = 0
+    while Product.query.filter_by(sku=fallback_sku). first() and attempt_count < 10:
+        random_suffix = f"{randint(100, 999)}"
+        fallback_sku = f"{prefix}-{microseconds}{random_suffix}"
+        attempt_count += 1
+    
+    return fallback_sku
 
 
 def auto_detect_category(product_name, industry=None):

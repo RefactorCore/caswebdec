@@ -73,7 +73,7 @@ def create_reversing_je(original_je, description_prefix, void_reason):
         original_je.description = f"{original_je.description} [REVERSED]"
         original_je.void_reason = f"Reversed by JE (Reason: {void_reason})"
 
-        db.session.flush()
+        db.session.add(reversing_je)
         return reversing_je
 
     except Exception as e:

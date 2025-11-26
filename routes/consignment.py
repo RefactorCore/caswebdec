@@ -495,30 +495,54 @@ def remit_payment(consignment_id):
         db.session.flush() 
 
         # 1. Fetch all pending sales for this consignment, oldest first
-        pending_consignment_sales = ConsignmentSale.query.filter_by(
-            consignment_id=consignment.id,
-            payment_status='Pending'
-        ).order_by(ConsignmentSale.created_at.asc()).all()
-
-        # 2. Track funds available to pay off these sales
+        # ✅ FIX: Process pending sales in batches to avoid memory issues
+        BATCH_SIZE = 100
+        offset = 0
         funds_available = amount_paid
+        total_sales_paid = 0
 
-        for cs in pending_consignment_sales:
-            if funds_available <= Decimal('0.00'):
+        while funds_available > Decimal('0.00'):
+            # Fetch next batch of pending sales
+            batch = ConsignmentSale.query. filter_by(
+                consignment_id=consignment.id,
+                payment_status='Pending'
+            ).order_by(ConsignmentSale.created_at.asc())\
+             .limit(BATCH_SIZE)\
+             .offset(offset)\
+             .all()
+            
+            # If no more sales to process, exit loop
+            if not batch:
                 break
             
-            # Get the amount we owe the supplier for THIS specific sale
-            sale_due = to_decimal(cs.amount_due_to_supplier)
+            # Process each sale in the batch
+            for cs in batch:
+                if funds_available <= Decimal('0.00'):
+                    break
+                
+                # Get the amount we owe the supplier for THIS specific sale
+                sale_due = to_decimal(cs.amount_due_to_supplier)
+                
+                # If we have enough funds to cover this sale, mark it Paid
+                if funds_available >= sale_due:
+                    cs.payment_status = 'Paid'
+                    funds_available -= sale_due
+                    total_sales_paid += 1
+                else:
+                    # Not enough funds left - leave this sale as Pending
+                    # Exit both loops since we can't pay any more sales
+                    funds_available = Decimal('0.00')
+                    break
             
-            # If we have enough funds to cover this sale, mark it Paid
-            # (Allows for small floating point tolerance if needed, but Decimal handles it well)
-            if funds_available >= sale_due:
-                cs.payment_status = 'Paid'
-                funds_available -= sale_due
-            else:
-                # Logic choice: If we only have partial funds left, we usually 
-                # leave the last sale as Pending until fully paid.
-                pass
+            # Move to next batch
+            offset += BATCH_SIZE
+            
+            # Flush changes to DB after each batch (but don't commit yet)
+            db. session.flush()
+
+        # Log summary
+        if total_sales_paid > 0:
+            log_action(f'Marked {total_sales_paid} consignment sales as Paid for {consignment.receipt_number}')
 
         # ----------------------------------------------------
         # 3. FINAL STATUS CHECK (Uses the updated item quantities)

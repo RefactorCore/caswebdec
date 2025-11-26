@@ -16,6 +16,8 @@ from extensions import limiter
 from routes.sku_utils import generate_sku
 from routes.fifo_utils import create_inventory_lot, consume_inventory_fifo
 from werkzeug.routing import BuildError
+from sqlalchemy import union_all
+from sqlalchemy.orm import joinedload
 
 from decimal import Decimal, ROUND_HALF_UP, getcontext, InvalidOperation
 getcontext().prec = 28
@@ -186,14 +188,12 @@ def index():
     # --- 4. 📊 KPI CALCULATIONS ---
     
     # SALES: Cash (POS) + AR (Invoices)
-    cash_sales_query = db.session.query(func.coalesce(func.sum(Sale.total), 0)).filter(Sale.voided_at.is_(None))
+    cash_sales_query = db.session.query(func.coalesce(func. sum(Sale.total), 0)).filter(Sale.voided_at.is_(None))
     ar_sales_query = db.session.query(func.coalesce(func.sum(ARInvoice.total), 0)).filter(ARInvoice.voided_at.is_(None))
-    
+
     # PURCHASES: Inventory Purchases (Cash + Credit) + AP Bills
-    # FIX: We sum ALL Purchase records (Cash AND Credit) that are not voided
     inventory_purchases_query = db.session.query(func.coalesce(func.sum(Purchase.total), 0)).filter(Purchase.voided_at.is_(None))
-    # AP Bills (Expenses/Utilities)
-    ap_bills_query = db.session.query(func.coalesce(func.sum(APInvoice.total), 0)).filter(APInvoice.voided_at.is_(None))
+    ap_bills_query = db.session.query(func.coalesce(func. sum(APInvoice.total), 0)).filter(APInvoice.voided_at. is_(None))
 
     # Apply Date Filters
     if start_date:
@@ -202,10 +202,11 @@ def index():
         inventory_purchases_query = inventory_purchases_query.filter(Purchase.created_at >= start_date)
         ap_bills_query = ap_bills_query.filter(APInvoice.date >= start_date)
 
-    # Execute Queries
-    total_sales = to_decimal(cash_sales_query.scalar()) + to_decimal(ar_sales_query.scalar())
-    
-    # FIX: Total Purchases = Inventory Purchases + AP Bills
+    # Execute Queries and Sum
+    total_cash_sales = to_decimal(cash_sales_query.scalar())
+    total_ar_sales = to_decimal(ar_sales_query.scalar())
+    total_sales = (total_cash_sales + total_ar_sales).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
     total_inventory_purchases = to_decimal(inventory_purchases_query.scalar())
     total_ap_bills = to_decimal(ap_bills_query.scalar())
     total_purchases = (total_inventory_purchases + total_ap_bills).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
@@ -1229,22 +1230,28 @@ def pos():
     search = request.args.get('search', '').strip()
 
     product_query = Product.query.filter_by(is_active=True)
-    consignment_query = ConsignmentItem.query.filter_by(is_active=True)
+    consignment_query = ConsignmentItem. query.filter_by(is_active=True)\
+        .options(joinedload(ConsignmentItem.consignment))
 
     if search:
         product_query = product_query.filter(
             (Product.name.ilike(f"%{search}%")) |
             (Product.sku.ilike(f"%{search}%"))
         )
-        consignment_query = consignment_query.filter(
+        consignment_query = consignment_query. filter(
             (ConsignmentItem.product_name.ilike(f"%{search}%")) |
             (ConsignmentItem.sku.ilike(f"%{search}%")) |
             (ConsignmentItem.barcode.ilike(f"%{search}%"))
         )
 
-    products = product_query.order_by(Product.name.asc()).all()
+    products = product_query.all() 
     consignment_items_raw = consignment_query.all()
-    consignment_items = [item for item in consignment_items_raw if item.quantity_available > 0]
+
+    consignment_items = []
+    for item in consignment_items_raw:
+        qty_available = item.quantity_received - item.quantity_sold - item.quantity_returned - item.quantity_damaged
+        if qty_available > 0:
+            consignment_items.append(item)
 
     combined_items = []
 
@@ -2405,6 +2412,18 @@ def audit_log():
     logs = AuditLog.query.order_by(AuditLog.timestamp.desc()).paginate(page=page, per_page=25)
     return render_template('audit_log.html', logs=logs)
 
+def safe_divide(numerator, denominator, default=Decimal('0.00')):
+    """Safe decimal division with default value."""
+    num = to_decimal(numerator)
+    denom = to_decimal(denominator)
+    
+    if denom == Decimal('0.00'):
+        return default
+    
+    try:
+        return (num / denom).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except Exception:
+        return default
 
 @core_bp.route('/inventory/lots/<int:product_id>')
 @login_required
@@ -2418,7 +2437,7 @@ def inventory_lots(product_id):
 
     total_qty = sum(lot['quantity'] for lot in lots)
     total_value = sum(to_decimal(lot['total_value']) for lot in lots)
-    avg_cost = (total_value / Decimal(total_qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if total_qty > 0 else Decimal('0.00')
+    avg_cost = safe_divide(total_value, total_qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP) if total_qty > 0 else Decimal('0.00')
 
     return render_template('inventory_lots.html',
                            product=product,

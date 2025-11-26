@@ -198,6 +198,18 @@ def get_fifo_cost(product_id, quantity):
     total_cost = total_cost.quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     return total_cost
 
+def safe_divide(numerator, denominator, default=Decimal('0.00')):
+    """Safe decimal division with default value."""
+    num = to_decimal(numerator)
+    denom = to_decimal(denominator)
+    
+    if denom == Decimal('0.00'):
+        return default
+    
+    try:
+        return (num / denom).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    except Exception:
+        return default
 
 def get_weighted_average_cost(product_id):
     """
@@ -226,7 +238,7 @@ def get_weighted_average_cost(product_id):
     if total_qty == 0:
         return Decimal('0.00')
 
-    avg = (total_value / Decimal(total_qty)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+    avg = safe_divide(total_value, total_qty).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
     return avg
 
 

@@ -2,7 +2,9 @@ from flask import request, abort
 from flask_login import current_user
 from models import db, AuditLog, Account
 from functools import lru_cache
+from flask_caching import Cache
 
+cache = Cache()
 
 def paginate_query(query, per_page=20):
     """Paginate SQLAlchemy query based on ?page= parameter."""
@@ -25,19 +27,13 @@ def log_action(action_description, user=None):
     )
     db.session.add(log)
 
+cache = Cache(config={'CACHE_TYPE': 'simple'})
 
 # --- NEW FUNCTION TO REMOVE MAGIC NUMBERS ---
-@lru_cache(maxsize=None) # Caches results for high performance
+@cache.memoize(timeout=3600)  # Cache for 1 hour
 def get_system_account_code(name):
-    """
-    Fetches the account code for a critical system account by its name.
-    Caches the result to avoid database lookups on every transaction.
-    If the account is not found, it will abort the request
-    because the system cannot proceed without it.
-    """
+    """Retrieve account code by name with caching."""
     account = Account.query.filter_by(name=name).first()
     if not account:
-        # Abort with a 500 error. The frontend will see this.
-        # This is critical to stop a bad transaction.
-        abort(500, f"Critical system account '{name}' not found. Please configure it in the Chart of Accounts.")
+        abort(500, f"Critical system account '{name}' not found.")
     return account.code

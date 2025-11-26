@@ -4,13 +4,14 @@ from flask_login import login_required
 from models import db, JournalEntry, Account, Sale, Purchase, Product, ARInvoice, APInvoice, CompanyProfile, Customer, Supplier, CreditMemo, Payment, SaleItem, PurchaseItem, StockAdjustment
 from collections import defaultdict
 import json
-from sqlalchemy import func, extract, cast, Date, or_, and_
+from sqlalchemy import func, extract, cast, Date, or_, and_, union_all, literal, case
 from datetime import datetime, date, timedelta
 from routes.decorators import role_required
 import io
 import csv
 from routes.utils import get_system_account_code  # add this near your other imports at top of file
 from decimal import Decimal, ROUND_HALF_UP
+from models import ARInvoiceItem, InventoryMovementItem, InventoryMovement, Branch
 
 reports_bp = Blueprint('reports', __name__, url_prefix='/reports')
 
@@ -632,158 +633,154 @@ def ap_aging():
 @login_required
 @role_required('Admin', 'Accountant')
 def stock_card(product_id):
-    """Generates an inventory stock card for a specific product."""
+    """Generates an inventory stock card for a specific product using optimized UNION query."""
     from models import ARInvoiceItem, InventoryMovementItem, InventoryMovement, Branch
+    from sqlalchemy import union_all, literal, case
 
     product = Product.query.get_or_404(product_id)
 
-    sales = SaleItem.query.join(Sale).filter(SaleItem.product_id == product.id).all()
-    purchases = PurchaseItem.query.filter_by(product_id=product.id).all()
-    adjustments = StockAdjustment.query.filter_by(product_id=product.id).all()
-    ar_invoice_items = ARInvoiceItem.query.join(ARInvoice).filter(ARInvoiceItem.product_id == product.id).all()
-    movement_items = InventoryMovementItem.query.join(InventoryMovement).filter(InventoryMovementItem.product_id == product.id).all()
+    # ✅ OPTIMIZED: Use UNION ALL to combine all transaction types in a single query
+    
+    # 1. Sales transactions
+    sales_query = db.session.query(
+        Sale.created_at. label('date'),
+        literal('Sale').label('type'),
+        Sale.id. label('ref_id'),
+        literal(0).label('qty_in'),
+        SaleItem.qty. label('qty_out'),
+        SaleItem.cogs.label('cost'),
+        Sale.voided_at.label('voided_at'),
+        Sale. document_number.label('doc_number')
+    ).join(SaleItem).filter(SaleItem.product_id == product_id)
 
+    # 2. Purchase transactions
+    purchases_query = db.session.query(
+        Purchase.created_at.label('date'),
+        literal('Purchase').label('type'),
+        Purchase.id.label('ref_id'),
+        PurchaseItem.qty.label('qty_in'),
+        literal(0).label('qty_out'),
+        PurchaseItem. unit_cost.label('cost'),
+        Purchase.voided_at.label('voided_at'),
+        literal(None).label('doc_number')
+    ).join(PurchaseItem).filter(PurchaseItem. product_id == product_id)
+
+    # 3. Stock adjustments
+    adjustments_query = db.session.query(
+        StockAdjustment. created_at.label('date'),
+        literal('Adjustment').label('type'),
+        StockAdjustment.id.label('ref_id'),
+        case(
+            (StockAdjustment.quantity_changed > 0, StockAdjustment.quantity_changed),
+            else_=0
+        ).label('qty_in'),
+        case(
+            (StockAdjustment.quantity_changed < 0, func.abs(StockAdjustment.quantity_changed)),
+            else_=0
+        ).label('qty_out'),
+        literal(product.cost_price).label('cost'),
+        StockAdjustment. voided_at.label('voided_at'),
+        literal(None).label('doc_number')
+    ).filter(StockAdjustment. product_id == product_id)
+
+    # 4. AR Invoice Items
+    ar_items_query = db.session.query(
+        ARInvoice.date.label('date'),
+        literal('AR Invoice').label('type'),
+        ARInvoice.id.label('ref_id'),
+        literal(0).label('qty_in'),
+        ARInvoiceItem.qty.label('qty_out'),
+        case(
+            (ARInvoiceItem.cogs > 0, ARInvoiceItem.cogs / ARInvoiceItem.qty),
+            else_=literal(product.cost_price)
+        ).label('cost'),
+        ARInvoice.voided_at.label('voided_at'),
+        ARInvoice.invoice_number.label('doc_number')
+    ).join(ARInvoiceItem).filter(ARInvoiceItem.product_id == product_id)
+
+    # 5. Inventory Movements
+    movements_query = db.session. query(
+        InventoryMovement.created_at.label('date'),
+        literal('Movement').label('type'),
+        InventoryMovement.id.label('ref_id'),
+        case(
+            (InventoryMovement.movement_type == 'receive', InventoryMovementItem.quantity),
+            else_=0
+        ).label('qty_in'),
+        case(
+            (InventoryMovement.movement_type == 'transfer', InventoryMovementItem. quantity),
+            else_=0
+        ).label('qty_out'),
+        InventoryMovementItem.unit_cost.label('cost'),
+        literal(None).label('voided_at'),
+        literal(None).label('doc_number')
+    ).join(InventoryMovementItem).filter(InventoryMovementItem.product_id == product_id)
+
+    # ✅ COMBINE ALL QUERIES with UNION ALL
+    combined_query = union_all(
+        sales_query,
+        purchases_query,
+        adjustments_query,
+        ar_items_query,
+        movements_query
+    ). alias('all_transactions')
+
+    # ✅ Execute the unified query and order by date
+    transactions_raw = db.session.query(combined_query).order_by(combined_query.c.date). all()
+
+    # Process transactions for display
     transactions = []
-
-    # --- 1. SALES ---
-    for s in sales:
-        is_voided = getattr(s.sale, 'voided_at', None) is not None
+    
+    for t in transactions_raw:
+        is_voided = t.voided_at is not None
         
-        # Always add the Original Sale (Out)
-        transactions.append({
-            'date': s.sale.created_at,
-            'type': f'Sale (POS) #{s.sale.id}' + (' [VOIDED]' if is_voided else ''),
-            'ref_id': s.sale_id,
-            'qty_in': 0,
-            'qty_out': s.qty, # Item went out
-            'cost': getattr(s, 'cogs', None) or product.cost_price,
-            'voided': is_voided
-        })
-
-        # If voided, add a SECOND transaction for the Return (In)
-        if is_voided:
-            transactions.append({
-                'date': s.sale.voided_at or s.sale.created_at, # Use void date if available
-                'type': f'Void Reversal (Sale #{s.sale.id})',
-                'ref_id': s.sale_id,
-                'qty_in': s.qty, # Item came back in
-                'qty_out': 0,
-                'cost': getattr(s, 'cogs', None) or product.cost_price,
-                'voided': False # This specific line is the "fix", not the voided line itself
-            })
-
-    # --- 2. PURCHASES ---
-    for p in purchases:
-        is_voided = getattr(p.purchase, 'voided_at', None) is not None
+        # Determine transaction description
+        if t.type == 'Sale':
+            type_desc = f'Sale (POS) #{t.ref_id}' + (' [VOIDED]' if is_voided else '')
+        elif t.type == 'Purchase':
+            type_desc = f'Purchase #{t.ref_id}' + (' [VOIDED]' if is_voided else '')
+        elif t.type == 'Adjustment':
+            type_desc = f'Adjustment #{t. ref_id}' + (' [VOIDED]' if is_voided else '')
+        elif t.type == 'AR Invoice':
+            doc_num = t. doc_number or f"AR-{t.ref_id}"
+            type_desc = f'Billing Invoice {doc_num}' + (' [VOIDED]' if is_voided else '')
+        elif t.type == 'Movement':
+            type_desc = f'Movement #{t.ref_id}'
+        else:
+            type_desc = f'{t.type} #{t.ref_id}'
         
-        # Always add the Original Purchase (In)
+        # Add original transaction
         transactions.append({
-            'date': p.purchase.created_at,
-            'type': f'Purchase #{p.purchase.id}' + (' [VOIDED]' if is_voided else ''),
-            'ref_id': p.purchase_id,
-            'qty_in': p.qty, # Item came in
-            'qty_out': 0,
-            'cost': p.unit_cost,
+            'date': t.date,
+            'type': type_desc,
+            'ref_id': t.ref_id,
+            'qty_in': t.qty_in,
+            'qty_out': t.qty_out,
+            'cost': t.cost or product.cost_price,
             'voided': is_voided
         })
         
-        # If voided, add a SECOND transaction for the Removal (Out)
+        # If voided, add reversal transaction
         if is_voided:
             transactions.append({
-                'date': p.purchase.voided_at or p.purchase.created_at,
-                'type': f'Void Reversal (Purchase #{p.purchase.id})',
-                'ref_id': p.purchase_id,
-                'qty_in': 0,
-                'qty_out': p.qty, # Item removed
-                'cost': p.unit_cost,
+                'date': t.voided_at or t.date,
+                'type': f'Void Reversal ({t.type} #{t.ref_id})',
+                'ref_id': t.ref_id,
+                'qty_in': t.qty_out,  # Swap
+                'qty_out': t. qty_in,  # Swap
+                'cost': t.cost or product.cost_price,
                 'voided': False
             })
 
-    # --- 3. ADJUSTMENTS ---
-    for adj in adjustments:
-        is_voided = adj.voided_at is not None
-        
-        # Determine direction of original adjustment
-        orig_qty_in = adj.quantity_changed if adj.quantity_changed > 0 else 0
-        orig_qty_out = abs(adj.quantity_changed) if adj.quantity_changed < 0 else 0
-        
-        transactions.append({
-            'date': adj.created_at,
-            'type': f'Adjustment #{adj.id} ({adj.reason})' + (' [VOIDED]' if is_voided else ''),
-            'ref_id': adj.id,
-            'qty_in': orig_qty_in,
-            'qty_out': orig_qty_out,
-            'cost': product.cost_price,
-            'voided': is_voided
-        })
-
-        if is_voided:
-            # Reverse it
-            transactions.append({
-                'date': adj.voided_at or adj.created_at,
-                'type': f'Void Reversal (Adj #{adj.id})',
-                'ref_id': adj.id,
-                'qty_in': orig_qty_out, # Swap In/Out
-                'qty_out': orig_qty_in,
-                'cost': product.cost_price,
-                'voided': False
-            })
-
-    # --- 4. AR INVOICES ---
-    for ar_item in ar_invoice_items:
-        is_voided = getattr(ar_item.ar_invoice, 'voided_at', None) is not None
-        invoice_num = ar_item.ar_invoice.invoice_number or f"AR-{ar_item.ar_invoice.id}"
-        
-        # Original (Out)
-        transactions.append({
-            'date': ar_item.ar_invoice.date,
-            'type': f'Billing Invoice {invoice_num}' + (' [VOIDED]' if is_voided else ''),
-            'ref_id': ar_item.ar_invoice_id,
-            'qty_in': 0,
-            'qty_out': ar_item.qty,
-            'cost': (to_decimal(ar_item.cogs) / Decimal(ar_item.qty)) if (getattr(ar_item, 'cogs', None) and ar_item.qty) else product.cost_price,
-            'voided': is_voided
-        })
-        
-        # Reversal (In)
-        if is_voided:
-             transactions.append({
-                'date': ar_item.ar_invoice.voided_at or ar_item.ar_invoice.date,
-                'type': f'Void Reversal (Inv {invoice_num})',
-                'ref_id': ar_item.ar_invoice_id,
-                'qty_in': ar_item.qty,
-                'qty_out': 0,
-                'cost': (to_decimal(ar_item.cogs) / Decimal(ar_item.qty)) if (getattr(ar_item, 'cogs', None) and ar_item.qty) else product.cost_price,
-                'voided': False
-            })
-
-    # --- 5. MOVEMENTS (Transfers) ---
-    for mi in movement_items:
-        m = mi.movement
-        transactions.append({
-            'date': getattr(m, 'created_at', datetime.utcnow()),
-            'type': f'Movement: {m.movement_type.title()} (#{m.id})',
-            'ref_id': m.id,
-            'qty_in': mi.quantity if m.movement_type == 'receive' else 0,
-            'qty_out': mi.quantity if m.movement_type == 'transfer' else 0,
-            'cost': mi.unit_cost,
-            'voided': False
-        })
-
-    # Sort by date
-    transactions.sort(key=lambda x: x['date'] or datetime.utcnow())
-
-    # --- CALCULATION ---
-    # Now, net_delta will correctly include the Original (+) and Void (-) actions, 
-    # resulting in a Net 0 change for voided transactions.
+    # Calculate opening balance and running balance
     net_delta = sum((t.get('qty_in', 0) - t.get('qty_out', 0)) for t in transactions)
-
     current_quantity = product.quantity or 0
     opening_balance = int(current_quantity - net_delta)
 
     report_transactions = []
     first_date = transactions[0]['date'] if transactions else datetime.utcnow()
     
+    # Add opening balance row
     report_transactions.append({
         'date': first_date - timedelta(seconds=1),
         'type': 'Opening Balance',
@@ -795,8 +792,8 @@ def stock_card(product_id):
         'voided': False
     })
 
+    # Calculate running balance
     running_balance = opening_balance
-
     for t in transactions:
         running_balance += (t.get('qty_in', 0) - t.get('qty_out', 0))
         t['balance'] = running_balance
@@ -1083,32 +1080,25 @@ def export_trial_balance():
 
     # --- MODIFIED: The core function now accepts dates ---
 def aggregate_account_balances(start_date=None, end_date=None):
-    """
-    Aggregates Journal Entries.
-    Returns: { account_code: {'debit': Decimal, 'credit': Decimal, 'net': Decimal} }
-    """
     from collections import defaultdict
     from datetime import timedelta
-
-    # Initialize with a dictionary structure instead of a single Decimal
+    
     balances = defaultdict(lambda: {'debit': Decimal('0.00'), 'credit': Decimal('0.00'), 'net': Decimal('0.00')})
-
+    
     query = JournalEntry.query.filter(JournalEntry.voided_at.is_(None))
-
+    
     if start_date:
         query = query.filter(JournalEntry.created_at >= start_date)
-
     if end_date:
         try:
-            # Inclusive end date logic
             end_exclusive = end_date + timedelta(days=1)
-            query = query.filter(JournalEntry.created_at < end_exclusive)
+            query = query. filter(JournalEntry.created_at < end_exclusive)
         except Exception:
             query = query.filter(JournalEntry.created_at <= end_date)
-
-    all_journal_entries = query.all()
-
-    for je in all_journal_entries:
+    
+    # ✅ FIX: Use yield_per() to process in batches
+    BATCH_SIZE = 500
+    for je in query.yield_per(BATCH_SIZE):
         try:
             entries = []
             if hasattr(je, 'entries'):
@@ -1117,7 +1107,7 @@ def aggregate_account_balances(start_date=None, end_date=None):
                 entries = json.loads(getattr(je, 'entries_json', '[]') or '[]')
         except Exception:
             continue
-
+        
         for entry in entries:
             account_code = entry.get('account_code')
             if not account_code:
@@ -1126,11 +1116,10 @@ def aggregate_account_balances(start_date=None, end_date=None):
             debit = to_decimal(entry.get('debit', '0.00'))
             credit = to_decimal(entry.get('credit', '0.00'))
             
-            # Store distinct totals
             balances[account_code]['debit'] += debit
             balances[account_code]['credit'] += credit
             balances[account_code]['net'] += (debit - credit)
-
+    
     return balances
 
 

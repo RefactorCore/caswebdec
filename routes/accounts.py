@@ -6,6 +6,7 @@ import json
 from datetime import datetime
 from routes.utils import log_action
 from decimal import Decimal, ROUND_HALF_UP, getcontext
+from flask_caching import Cache
 
 getcontext().prec = 28
 
@@ -80,38 +81,48 @@ def add_account():
     return redirect(url_for('accounts.chart_of_accounts'))
 
 
+# routes/accounts.py (around line 58-94)
+
 @accounts_bp.route('/update/<int:id>', methods=['POST'])
 @login_required
 @role_required('Admin', 'Accountant')
 def update_account(id):
+    from routes.utils import cache, get_system_account_code  # ✅ Import both
+    
     acc = Account.query.get_or_404(id)
 
     new_code = request.form.get('code')
     new_name = request.form.get('name')
     new_type = request.form.get('type')
 
-    # --- ADD THIS SERVER-SIDE VALIDATION ---
-    # Check if this is a system account and if the name is being changed
+    # Server-side validation for system accounts
     if acc.name in SYSTEM_ACCOUNT_NAMES and new_name != acc.name:
         flash(f'Cannot change the name of a critical system account ("{acc.name}").', 'danger')
         return redirect(url_for('accounts.chart_of_accounts'))
-    # --- END OF NEW VALIDATION ---
 
-    # Check for duplicate code (if changed)
+    # Check for duplicate code
     if new_code != acc.code and Account.query.filter_by(code=new_code).first():
         flash(f'Account code {new_code} already exists.', 'danger')
         return redirect(url_for('accounts.chart_of_accounts'))
 
-    # Check for duplicate name (if changed)
-    if new_name != acc.name and Account.query.filter_by(name=new_name).first():
+    # Check for duplicate name
+    if new_name != acc.name and Account. query.filter_by(name=new_name).first():
         flash(f'Account name {new_name} already exists.', 'danger')
         return redirect(url_for('accounts.chart_of_accounts'))
 
-    # Log what changed
+    # ✅ FIX: Invalidate cache BEFORE updating
+    if acc.name != new_name and acc.name in SYSTEM_ACCOUNT_NAMES:
+        try:
+            cache.delete_memoized(get_system_account_code, acc.name)
+            print(f"🗑️ Cache cleared for account: {acc.name}")
+        except Exception as e:
+            print(f"⚠️ Cache invalidation warning: {e}")
+
+    # Log changes
     changes = []
     if acc.code != new_code:
         changes.append(f'code from "{acc.code}" to "{new_code}"')
-    if acc.name != new_name:
+    if acc. name != new_name:
         changes.append(f'name from "{acc.name}" to "{new_name}"')
     if acc.type != new_type:
         changes.append(f'type from "{acc.type}" to "{new_type}"')
