@@ -1,6 +1,6 @@
 from flask import Blueprint, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_login import login_required, current_user
-from models import db, ConsignmentSupplier, ConsignmentReceived, ConsignmentItem, ConsignmentRemittance, CompanyProfile
+from models import db, ConsignmentSupplier, ConsignmentReceived, ConsignmentItem, ConsignmentRemittance, CompanyProfile, ConsignmentSale
 from routes.decorators import role_required
 from routes.utils import paginate_query, log_action
 from datetime import datetime, timedelta
@@ -494,6 +494,32 @@ def remit_payment(consignment_id):
         # Flush the session so the following query includes the item.quantity_returned updates
         db.session.flush() 
 
+        # 1. Fetch all pending sales for this consignment, oldest first
+        pending_consignment_sales = ConsignmentSale.query.filter_by(
+            consignment_id=consignment.id,
+            payment_status='Pending'
+        ).order_by(ConsignmentSale.created_at.asc()).all()
+
+        # 2. Track funds available to pay off these sales
+        funds_available = amount_paid
+
+        for cs in pending_consignment_sales:
+            if funds_available <= Decimal('0.00'):
+                break
+            
+            # Get the amount we owe the supplier for THIS specific sale
+            sale_due = to_decimal(cs.amount_due_to_supplier)
+            
+            # If we have enough funds to cover this sale, mark it Paid
+            # (Allows for small floating point tolerance if needed, but Decimal handles it well)
+            if funds_available >= sale_due:
+                cs.payment_status = 'Paid'
+                funds_available -= sale_due
+            else:
+                # Logic choice: If we only have partial funds left, we usually 
+                # leave the last sale as Pending until fully paid.
+                pass
+
         # ----------------------------------------------------
         # 3. FINAL STATUS CHECK (Uses the updated item quantities)
         # ----------------------------------------------------
@@ -528,7 +554,7 @@ def remit_payment(consignment_id):
         from models import JournalEntry
         from routes.utils import get_system_account_code
 
-        commission_earned = (consignment.get_total_sold_value() - amount_due).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+        # commission_earned = (consignment.get_total_sold_value() - amount_due).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
 
         
         je_lines = [
@@ -544,12 +570,12 @@ def remit_payment(consignment_id):
             }
         ]
 
-        if commission_earned > Decimal('0.00'):
-            je_lines.append({
-                'account_code': get_system_account_code('Consignment Commission Revenue'),
-                'debit': "0.00",
-                'credit': format(commission_earned, '0.2f')
-            })
+        # if commission_earned > Decimal('0.00'):
+        #     je_lines.append({
+        #         'account_code': get_system_account_code('Consignment Commission Revenue'),
+        #         'debit': "0.00",
+        #         'credit': format(commission_earned, '0.2f')
+        #     })
 
         journal_entry = JournalEntry(
             description=f'Settlement for {consignment.receipt_number}: Paid {consignment.supplier.name} ₱{amount_paid:,.2f}, Returned {total_returned} items',

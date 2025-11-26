@@ -100,7 +100,7 @@ def void_sale(sale_id):
         # --- A. Consignment Payment Check ---
         consignment_sale = ConsignmentSale.query.filter_by(sale_id=sale.id).first()
         if consignment_sale and consignment_sale.payment_status == 'Paid':
-             flash('Cannot void sale: The consignment supplier has already been paid for these items. Please void the Remittance first.', 'danger')
+             flash('Cannot void sale: The consignment supplier has already been paid for these items.', 'danger')
              return redirect(url_for('core.sales'))
 
         # --- B. Reverse Inventory (Standard FIFO) ---
@@ -639,6 +639,7 @@ def void_consignment_remittance(remittance_id):
         
         count_reset = 0
         for cs in linked_sales:
+            # Only reset sales that happened before or during this remittance
             if cs.sale.created_at <= remittance.created_at:
                 cs.payment_status = 'Pending'
                 count_reset += 1
@@ -646,6 +647,8 @@ def void_consignment_remittance(remittance_id):
         remittance.voided_at = datetime.utcnow()
         remittance.voided_by = current_user.id
         remittance.void_reason = void_reason
+
+        remittance.consignment.status = 'Partial'
         
         log_action(f'Voided Consignment Remittance #{remittance.id}. Sales reset: {count_reset}')
         db.session.commit()
