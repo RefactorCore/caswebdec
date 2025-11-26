@@ -5,3 +5,4 @@ passlib
 pandas
 Flask-Limiter
 Flask-WTF
+flask_caching

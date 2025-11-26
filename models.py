@@ -110,6 +110,11 @@ class Product(db.Model):
             raise ValueError('Quantity cannot be negative')
         return value
 
+    __table_args__ = (
+        db.Index('idx_product_is_active', 'is_active'),
+        db.Index('idx_product_name', 'name'),  # For search
+    )
+
 
 # Add this new model after the Product model
 
@@ -181,6 +186,12 @@ class Sale(db.Model):
     void_reason = db.Column(db.String(500), nullable=True)
     voided_by_user = db.relationship('User', foreign_keys=[voided_by])
 
+    __table_args__ = (
+        db.Index('idx_sale_created_at', 'created_at'),
+        db.Index('idx_sale_voided_at', 'voided_at'),
+        db. Index('idx_sale_customer', 'customer_name'),
+    )
+
 
 class SaleItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -238,6 +249,11 @@ class JournalEntry(db.Model):
             return json.loads(self.entries_json)
         except (json.JSONDecodeError, TypeError):
             return []
+
+    __table_args__ = (
+        db.Index('idx_je_created_at', 'created_at'),
+        db.Index('idx_je_voided_at', 'voided_at'),
+    )
 
 # ✅ --- FIX: Inherits from UserMixin to integrate with Flask-Login ---
 class User(db.Model, UserMixin):
