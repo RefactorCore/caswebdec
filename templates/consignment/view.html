@@ -117,7 +117,7 @@
                     
                     {% if consignment.status != 'Closed' %}
                     <button class="btn btn-success w-100" data-bs-toggle="modal" data-bs-target="#remitPaymentModal">
-                        <i class="bi bi-cash-stack me-1"></i> Remit Payment
+                        <i class="bi bi-cash-stack me-1"></i> Remit Payment/Products
                     </button>
                     {% else %}
                     <p class="text-center text-success mb-0">
@@ -237,8 +237,8 @@
                             <th>Amount</th>
                             <th>Mode</th>
                             <th>Notes</th>
-                            <th>Status</th>
-                            <th>Action</th>
+<!--                             <th>Status</th>
+                            <th>Action</th> -->
                         </tr>
                     </thead>
                     <tbody>
@@ -249,20 +249,20 @@
                             <td>₱{{ "{:,.2f}".format(r.amount_paid) }}</td>
                             <td>{{ r.payment_mode }}</td>
                             <td>{{ r.notes }}</td>
-                            <td>
+<!--                             <td>
                                 {% if r.voided_at %}
                                     <span class="badge bg-danger">VOIDED</span>
                                 {% else %}
                                     <span class="badge bg-success">Active</span>
                                 {% endif %}
                             </td>
-                            <td>
+                            <td> -->
                                 {% if not r.voided_at %}
-                                <button type="button" class="btn btn-sm btn-outline-danger" 
+                          <!--       <button type="button" class="btn btn-sm btn-outline-danger" 
                                         data-bs-toggle="modal" 
                                         data-bs-target="#voidRemittanceModal{{ r.id }}">
                                     <i class="bi bi-x-circle"></i> Void
-                                </button>
+                                </button> -->
                     
                                 <div class="modal fade" id="voidRemittanceModal{{ r.id }}" tabindex="-1">
                                     <div class="modal-dialog">
