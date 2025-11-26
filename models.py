@@ -630,9 +630,15 @@ class ConsignmentRemittance(db.Model):
     payment_method = db.Column(db.String(50))
     notes = db.Column(db.Text)
     created_by_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+
+    voided_at = db.Column(db.DateTime, nullable=True)
+    voided_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    void_reason = db.Column(db.String(255), nullable=True)
     
     consignment = db.relationship('ConsignmentReceived', back_populates='remittances')
-    created_by = db.relationship('User')
+    created_by = db.relationship('User', foreign_keys=[created_by_id])
+    voided_by_user = db.relationship('User', foreign_keys=[voided_by])
+    
 
     def __repr__(self):
         return f'<ConsignmentRemittance {self.id} for {self.consignment_id}>'

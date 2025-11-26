@@ -1,11 +1,14 @@
 # https://github.com/your/repo/path/app.py (update in your repo)
-# Updated: register money and num filters inside create_app and seed sample CompanyProfile, Admin user, and Product "Tires" (QTY 10, sale_price 900) based on the provided models.py.
+# Updated: register money and num filters inside create_app and removed invalid global assignment.
 
+# --- FIX: Import the necessary functions ---
 from flask import Flask, redirect, url_for, request
+# --- FIX: Import current_user ---
 from flask_login import LoginManager, current_user
 from routes.accounts import accounts_bp
 
-from models import db, User, CompanyProfile, Account, Product
+
+from models import db, User, CompanyProfile, Account
 from config import Config
 from datetime import datetime
 from flask_limiter import Limiter
@@ -15,7 +18,6 @@ from passlib.hash import pbkdf2_sha256
 from routes.void_transactions import void_bp
 # keep local reference to a to_decimal implementation we can call (avoid circular imports at module level)
 from routes.ar_ap import to_decimal as _to_decimal
-from decimal import Decimal
 
 def create_app():
     app = Flask(__name__, instance_relative_config=True)
@@ -29,6 +31,7 @@ def create_app():
 
     # --- Login Manager ---
     login_manager = LoginManager()
+    # --- FIX: Point to the correct blueprint endpoint ---
     login_manager.login_view = 'core.login'
     login_manager.init_app(app)
 
@@ -38,12 +41,17 @@ def create_app():
 
     # Register template filters inside create_app to avoid import-time issues
     def money_filter(value):
+        """
+        Format a Decimal/number to a 2-decimal string WITHOUT currency symbol.
+        Templates should add the currency symbol where needed (e.g., ₱{{ value | money }}).
+        """
         try:
             return format(_to_decimal(value), '0.2f')
         except Exception:
             return "0.00"
 
     def num_filter(value):
+        """Return a native float safe for use with tojson / JS numeric usage."""
         try:
             return float(_to_decimal(value))
         except Exception:
@@ -60,12 +68,15 @@ def create_app():
 
         # If user is not authenticated and is trying to access anything else, let login handle it
         if not current_user.is_authenticated and request.endpoint != 'core.login':
-            # Check for Company Profile first
+             # Check for Company Profile first
             if not CompanyProfile.query.first():
                 return redirect(url_for('core.setup_license'))
             # Check for Admin User next
             elif not User.query.filter_by(role='Admin').first():
-                return redirect(url_for('core.setup_license')) # Start from step 1
+                 return redirect(url_for('core.setup_license')) # Start from step 1
+
+
+
 
     # --- Context Processor ---
     @app.context_processor
@@ -82,6 +93,7 @@ def create_app():
     from routes.consignment import consignment_bp
     from routes.void_transactions import void_bp
 
+
     app.register_blueprint(core_bp)
     app.register_blueprint(ar_ap_bp)
     app.register_blueprint(reports_bp)
@@ -92,8 +104,9 @@ def create_app():
     return app
 
 def seed_essential_data(app):
-    """Seeds essential data (CompanyProfile, Admin user, Chart of Accounts, and sample Product 'Tires') based on models.py."""
-
+    """Seeds essential data (Admin user and COA) if the database is empty."""
+    
+    # Define the Chart of Accounts list here
     accounts_to_seed = [
         ('101','Cash','Asset'),
         ('102','Petty Cash','Asset'),
@@ -102,7 +115,7 @@ def seed_essential_data(app):
         ('121', 'Creditable Withholding Tax', 'Asset'),
         ('132', 'Consignment Goods on Hand', 'Asset'),
         ('201','Accounts Payable','Liability'),
-        ('220', 'Consignment Payable','Liability'),
+        ('220', 'Consignment Payable', 'Liability'), 
         ('301','Capital','Equity'),
         ('302', 'Opening Balance Equity', 'Equity'),
         ('401','Sales Revenue','Revenue'),
@@ -113,7 +126,7 @@ def seed_essential_data(app):
         ('501','COGS','Expense'),
         ('601','VAT Payable','Liability'),
         ('602','VAT Input','Asset'),
-        ('505', 'Inventory Loss', 'Expense'),
+        ('505', 'Inventory Loss', 'Expense'), 
         ('406', 'Inventory Gain', 'Revenue'),
         ('510', 'Rent Expense', 'Expense'),
         ('511', 'Utilities Expense', 'Expense'),
@@ -124,95 +137,26 @@ def seed_essential_data(app):
     ]
 
     with app.app_context():
-        # Seed CompanyProfile (required fields: name, tin, address)
-        try:
-            if not CompanyProfile.query.first():
-                print("🌱 Seeding CompanyProfile...")
-                cp = CompanyProfile(
-                    name='Sample Company',
-                    business_style='Retail',
-                    tin='000-000-000',
-                    address='123 Sample St, Sample City',
-                    license_key=None,
-                    next_or_number=1,
-                    next_si_number=1,
-                    next_invoice_number=1,
-                    next_consignment_number=1,
-                    branch='Main'
-                )
-                db.session.add(cp)
-                db.session.commit()
-                print("✅ CompanyProfile created.")
-            else:
-                print("ℹ️ CompanyProfile already exists, skipping.")
-        except Exception as e:
-            db.session.rollback()
-            print(f"❌ Error seeding CompanyProfile: {e}")
-
-        # Seed Admin user (User has username, password_hash, role)
-        try:
-            admin_exists = User.query.filter_by(role='Admin').first() or User.query.filter_by(username='admin').first()
-            if not admin_exists:
-                print("🌱 Seeding Admin user...")
-                hashed = pbkdf2_sha256.hash('admin123')
-                admin = User(
-                    username='admin',
-                    password_hash=hashed,
-                    role='Admin',
-                    created_at=datetime.utcnow()
-                )
-                db.session.add(admin)
-                db.session.commit()
-                print("✅ Admin user created (username: admin, password: admin123).")
-            else:
-                print("ℹ️ Admin user already exists, skipping.")
-        except Exception as e:
-            db.session.rollback()
-            print(f"❌ Error seeding Admin user: {e}")
-
-        # Seed Chart of Accounts
-        try:
-            if Account.query.count() == 0:
-                print("🌱 Seeding Chart of Accounts...")
+        # Check 1: Check for existing accounts
+        if Account.query.count() == 0:
+            print("🌱 Seeding Chart of Accounts...")
+            try:
                 for code, name, typ in accounts_to_seed:
-                    acc = Account(code=code, name=name, type=typ)
-                    db.session.add(acc)
+                    a = Account(code=code, name=name, type=typ)
+                    db.session.add(a)
                 db.session.commit()
                 print("✅ Chart of Accounts seeded.")
-            else:
-                print("ℹ️ Chart of Accounts already seeded, skipping.")
-        except Exception as e:
-            db.session.rollback()
-            print(f"❌ Error seeding Chart of Accounts: {e}")
-
-        # # Seed Product "Tires" with sku, name, sale_price, cost_price, quantity
-        # try:
-        #     existing = Product.query.filter_by(sku='TIRES-001').first() or Product.query.filter_by(name='Tires').first()
-        #     if not existing:
-        #         print("🌱 Seeding Product 'Tires' (QTY 10, sale_price 900)...")
-        #         p = Product(
-        #             sku='TIRES-001',
-        #             name='Tires',
-        #             category='Auto',
-        #             sale_price=Decimal('1000.00'),
-        #             cost_price=Decimal('900.00'),
-        #             quantity=10,
-        #             is_active=True,
-        #             created_at=datetime.utcnow()
-        #         )
-        #         db.session.add(p)
-        #         db.session.commit()
-        #         print("✅ Product 'Tires' created.")
-        #     else:
-        #         print("ℹ️ Product 'Tires' already exists, skipping.")
-        # except Exception as e:
-        #     db.session.rollback()
-        #     print(f"❌ Error seeding Product 'Tires': {e}")
+            except Exception as e:
+                db.session.rollback()
+                print(f"❌ Error seeding COA: {e}")
 
 if __name__ == '__main__':
     app = create_app()
     with app.app_context():
-        # Create all tables then seed
+        # 1. Create all tables
         db.create_all()
+        
+        # 2. Seed the essential data (Pass the app object to the function)
         seed_essential_data(app)
+        
     app.run(debug=True)
