@@ -267,14 +267,25 @@
                     <div class="row mb-3">
                         <div class="col-md-4">
                             <label class="form-label"><strong>Customer *</strong></label>
-                            <select name="customer_id" id="customerSelect" class="form-select" onchange="updatePaymentTerms()" required>
-                                <option value="">Select Customer...</option>
+                            <select name="customer_id" id="customerSelect" class="form-select" onchange="handleCustomerSelection()">
+                                <option value="">Select Customer... </option>
+                                <option value="new" class="text-primary fw-bold">+ Create New Customer</option>
                                 {% for cust in customers %}
                                 <option value="{{ cust.id }}" data-terms="{{ cust.payment_terms_days if cust.payment_terms_days else 30 }}">
                                     {{ cust.name }}
                                 </option>
                                 {% endfor %}
                             </select>
+                            
+                            <!-- ✅ NEW: Hidden input for custom customer name -->
+                            <input type="text" 
+                                   name="customer_name" 
+                                   id="customerNameInput" 
+                                   class="form-control mt-2 d-none" 
+                                   placeholder="Enter new customer name... ">
+                            <small class="text-muted d-none" id="newCustomerHint">
+                                <i class="bi bi-info-circle"></i> A new customer will be created automatically
+                            </small>
                         </div>
                         <div class="col-md-4">
                             <label class="form-label"><strong>Due Date *</strong></label>
@@ -649,12 +660,61 @@ function calculateWHT(changedField) {
     }
 }
 
-
+function handleCustomerSelection() {
+    const customerSelect = document.getElementById('customerSelect');
+    const customerNameInput = document. getElementById('customerNameInput');
+    const newCustomerHint = document. getElementById('newCustomerHint');
+    const selectedValue = customerSelect.value;
+    
+    if (selectedValue === 'new') {
+        // Show input field for new customer
+        customerNameInput.classList.remove('d-none');
+        customerNameInput.required = true;
+        customerNameInput.focus();
+        newCustomerHint.classList.remove('d-none');
+        
+        // Clear and hide select to avoid confusion
+        customerSelect.value = '';
+        
+        // Set default payment terms for new customer
+        document.getElementById('paymentTermsDisplay').textContent = '30';
+        const today = new Date();
+        const dueDate = new Date(today.getTime() + (30 * 24 * 60 * 60 * 1000));
+        document.getElementById('dueDate'). value = dueDate.toISOString().split('T')[0];
+    } else if (selectedValue) {
+        // Existing customer selected - hide custom input
+        customerNameInput.classList.add('d-none');
+        customerNameInput.required = false;
+        customerNameInput.value = '';
+        newCustomerHint. classList.add('d-none');
+        
+        // Update payment terms as before
+        updatePaymentTerms();
+    } else {
+        // Nothing selected
+        customerNameInput.classList.add('d-none');
+        customerNameInput.required = false;
+        newCustomerHint.classList.add('d-none');
+    }
+}
 
 // Auto-calculate due date based on customer payment terms
 function updatePaymentTerms() {
     const customerSelect = document.getElementById('customerSelect');
     const selectedOption = customerSelect.options[customerSelect.selectedIndex];
+    
+    // Check if custom customer name is being used
+    const customerNameInput = document.getElementById('customerNameInput');
+    if (! customerNameInput.classList.contains('d-none') && customerNameInput.value) {
+        // New customer - use default 30 days
+        const paymentTerms = 30;
+        const today = new Date();
+        const dueDate = new Date(today.getTime() + (paymentTerms * 24 * 60 * 60 * 1000));
+        document.getElementById('dueDate').value = dueDate. toISOString().split('T')[0];
+        document.getElementById('paymentTermsDisplay').textContent = paymentTerms;
+        return;
+    }
+
     const paymentTerms = parseInt(selectedOption.dataset.terms) || 30;
     
     // Calculate due date
@@ -662,8 +722,8 @@ function updatePaymentTerms() {
     const dueDate = new Date(today.getTime() + (paymentTerms * 24 * 60 * 60 * 1000));
     
     // Format date as YYYY-MM-DD for input
-    const dueDateStr = dueDate.toISOString().split('T')[0];
-    document.getElementById('dueDate').value = dueDateStr;
+    const dueDateStr = dueDate.toISOString(). split('T')[0];
+    document.getElementById('dueDate'). value = dueDateStr;
     
     // Display payment terms
     document.getElementById('paymentTermsDisplay').textContent = paymentTerms;
@@ -681,8 +741,8 @@ document.getElementById('newBillingInvoiceModal').addEventListener('shown.bs.mod
     // Set default due date (30 days from today) if not set
     if (!document.getElementById('dueDate').value) {
         const today = new Date();
-        const dueDate = new Date(today.getTime() + (30 * 24 * 60 * 60 * 1000));
-        document.getElementById('dueDate').value = dueDate.toISOString().split('T')[0];
+        const dueDate = new Date(today. getTime() + (30 * 24 * 60 * 60 * 1000));
+        document.getElementById('dueDate').value = dueDate. toISOString().split('T')[0];
     }
 });
 
@@ -690,6 +750,13 @@ document.getElementById('newBillingInvoiceModal').addEventListener('shown.bs.mod
 document.getElementById('newBillingInvoiceModal').addEventListener('hidden.bs.modal', function () {
     document.getElementById('billingInvoiceForm').reset();
     document.getElementById('lineItemsContainer').innerHTML = '';
+    
+    // Reset customer input visibility
+    document.getElementById('customerNameInput').classList.add('d-none');
+    document.getElementById('customerNameInput').value = '';
+    document.getElementById('newCustomerHint').classList.add('d-none');
+    document.getElementById('customerSelect').value = '';
+    
     lineItemCounter = 0;
     calculateTotals();
 });
