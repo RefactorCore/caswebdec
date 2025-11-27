@@ -143,6 +143,9 @@ class InventoryLot(db.Model):
     def __repr__(self):
         return f'<InventoryLot {self.id}: Product {self.product_id}, Qty: {self.quantity_remaining}, Cost: {self.unit_cost}>'
 
+    __table_args__ = (
+        db.Index('idx_inv_lot_fifo_lookup', 'product_id', 'quantity_remaining', 'created_at'),
+    )
 
 class InventoryTransaction(db.Model):
     """Records the consumption of inventory lots (for audit trail)"""
@@ -165,6 +168,12 @@ class InventoryTransaction(db.Model):
     
     def __repr__(self):
         return f'<InventoryTransaction {self.id}: Lot {self.lot_id}, Qty: {self.quantity_used}, Cost: {self.total_cost}>'
+
+    __table_args__ = (
+        db.Index('idx_inv_trans_lot_id', 'lot_id'),
+        db.Index('idx_inv_trans_sale_id', 'sale_id'),
+        db.Index('idx_inv_trans_ar_invoice_id', 'ar_invoice_id'),
+    )
 
 class Sale(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -251,8 +260,11 @@ class JournalEntry(db.Model):
             return []
 
     __table_args__ = (
+        # ✅ MERGED: All 4 indexes in one tuple
         db.Index('idx_je_created_at', 'created_at'),
-        db.Index('idx_je_voided_at', 'voided_at'),
+        db. Index('idx_je_voided_at', 'voided_at'),
+        db.Index('idx_je_voided_desc', 'voided_at', 'description'),
+        db. Index('idx_je_created_voided', 'created_at', 'voided_at'),
     )
 
 # ✅ --- FIX: Inherits from UserMixin to integrate with Flask-Login ---
@@ -343,6 +355,11 @@ class Payment(db.Model):
     voided_by = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
     void_reason = db.Column(db.String(500), nullable=True)
     voided_by_user = db.relationship('User', foreign_keys=[voided_by])
+
+    __table_args__ = (
+        db.Index('idx_payment_ref', 'ref_type', 'ref_id'),
+        db.Index('idx_payment_date', 'date'),
+    )
 
 class CreditMemo(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -566,6 +583,12 @@ class ConsignmentSale(db.Model):
     
     items = db.relationship('ConsignmentSaleItem', backref='consignment_sale', cascade='all, delete-orphan')
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        db.Index('idx_consignment_sale_consignment_id', 'consignment_id'),
+        db.Index('idx_consignment_sale_sale_id', 'sale_id'),
+        db.Index('idx_consignment_sale_payment_status', 'payment_status'),
+    )
 
 class ConsignmentSaleItem(db.Model):
     """Line items for consignment sales"""
