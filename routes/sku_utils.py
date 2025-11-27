@@ -4,6 +4,8 @@ Works for ANY retail business type
 """
 from models import db, Product
 import re
+from sqlalchemy.exc import IntegrityError
+
 
 
 # ✅ UNIVERSAL CATEGORY PRESETS (Expandable)
@@ -92,7 +94,7 @@ INDUSTRY_CATEGORIES = {
 
 def generate_sku(product_name, category=None, custom_sku=None, industry=None):
     """
-    Universal SKU generator for any retail business. 
+    Universal SKU generator for any retail business.  
 
     Args:
         product_name: Name of the product
@@ -109,7 +111,7 @@ def generate_sku(product_name, category=None, custom_sku=None, industry=None):
 
     # 1.  CUSTOM SKU: Validate and use if provided
     if custom_sku and custom_sku.strip():
-        custom_sku = custom_sku.strip(). upper()
+        custom_sku = custom_sku.strip().upper()
 
         # Validate format
         if not re.match(r'^[A-Z0-9-]+$', custom_sku):
@@ -119,42 +121,42 @@ def generate_sku(product_name, category=None, custom_sku=None, industry=None):
             raise ValueError("SKU is too long (max 64 characters)")
 
         # Check uniqueness
-        existing = Product.query.filter_by(sku=custom_sku). first()
+        existing = Product.query.filter_by(sku=custom_sku).first()
         if existing:
             raise ValueError(f"SKU '{custom_sku}' already exists for: {existing.name}")
 
         return custom_sku
 
-    # 2. DETERMINE PREFIX
+    # 2.  DETERMINE PREFIX
     if category and category.strip():
         prefix = category.strip().upper()[:3]
     else:
         prefix = auto_detect_category(product_name, industry)
 
     # ✅ FIX: Use simpler, more reliable SKU generation
-    max_retries = 5  # Increase retries
+    max_retries = 5
     
     for attempt in range(max_retries):
         try:
             # Get engine name to determine locking strategy
-            engine_name = db.session.bind. dialect.name
+            engine_name = db.session.bind.dialect.name
             
             # ✅ SIMPLIFIED: Just get the highest number for this prefix
             if engine_name == 'sqlite':
                 # SQLite: Simple query without locking
                 existing_skus = db.session.query(Product.sku).filter(
-                    Product.sku. like(f'{prefix}-%')
+                    Product.sku.like(f'{prefix}-%')
                 ).all()
             else:
                 # PostgreSQL/MySQL/MariaDB: Use SELECT FOR UPDATE
-                existing_skus = db.session.query(Product. sku).filter(
+                existing_skus = db.session.query(Product.sku).filter(
                     Product.sku.like(f'{prefix}-%')
-                ). with_for_update().all()
+                ).with_for_update().all()
             
             # Extract numbers from existing SKUs
             max_num = 0
             # ✅ FIX: Simplified regex - match PREFIX-DIGITS at end of string
-            pattern = re.compile(rf'^{re. escape(prefix)}-(\d+)$')
+            pattern = re.compile(rf'^{re.escape(prefix)}-(\d+)$')
             
             for (sku,) in existing_skus:
                 match = pattern.match(sku)
@@ -171,12 +173,13 @@ def generate_sku(product_name, category=None, custom_sku=None, industry=None):
             new_sku = f"{prefix}-{next_num:05d}"
             
             # ✅ CRITICAL: Double-check uniqueness before returning
-            if not Product.query. filter_by(sku=new_sku).first():
-                return new_sku
+            if not Product.query.filter_by(sku=new_sku).first():
+                return new_sku  # Safe to use
             else:
-                # SKU already exists (race condition), retry
+                # Race condition detected, retry
                 if attempt < max_retries - 1:
                     continue
+                # If last attempt, fall through to raise error
                     
         except Exception as e:
             db.session.rollback()
@@ -194,7 +197,7 @@ def generate_sku(product_name, category=None, custom_sku=None, industry=None):
     
     # Ensure fallback is also unique
     attempt_count = 0
-    while Product.query.filter_by(sku=fallback_sku). first() and attempt_count < 10:
+    while Product.query.filter_by(sku=fallback_sku).first() and attempt_count < 10:
         random_suffix = f"{randint(100, 999)}"
         fallback_sku = f"{prefix}-{microseconds}{random_suffix}"
         attempt_count += 1

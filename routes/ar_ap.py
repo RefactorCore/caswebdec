@@ -464,12 +464,12 @@ def billing_invoices():
                     return redirect(url_for('ar_ap.billing_invoices'))
             elif customer_name:
                 # New customer name typed in
-                customer = Customer.query. filter_by(name=customer_name).first()
+                customer = Customer.query.filter_by(name=customer_name).first()
                 if not customer:
                     # Create new customer
                     customer = Customer(name=customer_name)
                     db.session.add(customer)
-                    db. session.flush()
+                    db.session.flush()
                     flash(f'ℹ️ Created new customer: {customer_name}', 'info')
                 customer_id = customer.id
             else:

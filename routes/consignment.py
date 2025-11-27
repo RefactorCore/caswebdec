@@ -503,7 +503,7 @@ def remit_payment(consignment_id):
 
         while funds_available > Decimal('0.00'):
             # Fetch next batch of pending sales
-            batch = ConsignmentSale.query. filter_by(
+            batch = ConsignmentSale.query.filter_by(
                 consignment_id=consignment.id,
                 payment_status='Pending'
             ).order_by(ConsignmentSale.created_at.asc())\
@@ -538,7 +538,7 @@ def remit_payment(consignment_id):
             offset += BATCH_SIZE
             
             # Flush changes to DB after each batch (but don't commit yet)
-            db. session.flush()
+            db.session.flush()
 
         # Log summary
         if total_sales_paid > 0:
@@ -550,7 +550,12 @@ def remit_payment(consignment_id):
         
         # Recalculate total disposition using the updated item quantities in the session
         total_disposed = db.session.query(
-            func.sum(ConsignmentItem.quantity_sold + ConsignmentItem.quantity_returned + ConsignmentItem.quantity_damaged)
+            func.coalesce(
+                func.sum(ConsignmentItem.quantity_sold + 
+                         ConsignmentItem.quantity_returned + 
+                         ConsignmentItem.quantity_damaged), 
+                0
+            )
         ).filter(ConsignmentItem.consignment_id == consignment.id).scalar() or 0
         
         original_total_items = consignment.total_items

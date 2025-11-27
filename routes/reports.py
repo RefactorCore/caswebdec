@@ -99,15 +99,17 @@ def trial_balance():
 def ledger(code):
     account = Account.query.filter_by(code=code).first_or_404()
     
-    # --- MODIFIED: Get dates from URL ---
+    # Get dates from URL
     start_date_str = request.args.get('start_date', '')
     end_date_str = request.args.get('end_date', '')
 
     start_date = parse_date(start_date_str)
     end_date = parse_date(end_date_str)
     
-    # --- MODIFIED: Filter the Journal Entry query by date ---
-    query = JournalEntry.query.order_by(JournalEntry.created_at)
+    # Filter the Journal Entry query by date
+    query = JournalEntry.query.filter(JournalEntry.voided_at.is_(None))\
+        .order_by(JournalEntry.created_at)
+    
     if start_date:
         query = query.filter(JournalEntry.created_at >= start_date)
     if end_date:
@@ -117,9 +119,12 @@ def ledger(code):
     rows = []
     balance = Decimal('0.00')
     
-    # --- MODIFIED: Get running balance *before* the start date (if one exists) ---
+    # Get running balance *before* the start date (opening balance)
     if start_date:
-        opening_balance_query = JournalEntry.query.filter(JournalEntry.created_at < start_date)
+        opening_balance_query = JournalEntry.query.filter(
+            JournalEntry.created_at < start_date,
+            JournalEntry.voided_at.is_(None)
+        )
         for je in opening_balance_query.all():
             for line in je.entries():
                 if line.get('account_code') == code:
@@ -128,19 +133,31 @@ def ledger(code):
                     balance += debit - credit
         
         # Add the opening balance as the first row
-        rows.append({'date': start_date, 'desc': 'Opening Balance', 'debit': Decimal('0.00'), 'credit': Decimal('0.00'), 'balance': balance})
+        rows.append({
+            'date': start_date, 
+            'desc': 'Opening Balance', 
+            'debit': Decimal('0.00'), 
+            'credit': Decimal('0.00'), 
+            'balance': balance
+        })
 
-
-    # --- MODIFIED: Loop through the *filtered* query ---
-    for je in query.all():
-        for line in je.entries():
+    # Loop through the filtered query using batch processing
+    BATCH_SIZE = 500
+    for je in query.yield_per(BATCH_SIZE):
+        entries = je.entries()
+        for line in entries:  # ✅ This was missing
             if line.get('account_code') == code:
                 debit = to_decimal(line.get('debit', 0))
                 credit = to_decimal(line.get('credit', 0))
                 balance += debit - credit
-                rows.append({'date': je.created_at, 'desc': je.description, 'debit': debit, 'credit': credit, 'balance': balance})
+                rows.append({
+                    'date': je.created_at, 
+                    'desc': je.description, 
+                    'debit': debit, 
+                    'credit': credit, 
+                    'balance': balance
+                })
     
-    # --- MODIFIED: Pass dates back to the template ---
     return render_template('ledger.html', account=account, rows=rows, 
                            balance=balance, start_date=start_date_str, end_date=end_date_str)
 
@@ -264,10 +281,10 @@ def vat_report():
     )
     
     # --- INPUT VAT ---
-    input_vat_query = db. session.query(
-        func. sum(Purchase.vat)
+    input_vat_query = db.session.query(
+        func.sum(Purchase.vat)
     ).filter(
-        Purchase. is_vatable == True,
+        Purchase.is_vatable == True,
         Purchase.voided_at == None
     )
 
@@ -290,10 +307,10 @@ def vat_report():
         func.sum(ARInvoice.total)
     ).filter(
         or_(
-            ARInvoice. is_vatable == False,
+            ARInvoice.is_vatable == False,
             and_(
                 ARInvoice.is_vatable == True,
-                ARInvoice. vat == 0.00
+                ARInvoice.vat == 0.00
             )
         ),
         ARInvoice.voided_at == None
@@ -308,7 +325,7 @@ def vat_report():
     )
 
     # --- NON-VAT AP INVOICES ---
-    non_vat_ap_query = db.session. query(
+    non_vat_ap_query = db.session.query(
         func.sum(APInvoice.total)
     ).filter(
         APInvoice.is_vatable == False,
@@ -335,7 +352,7 @@ def vat_report():
         non_vat_ap_query = non_vat_ap_query.filter(APInvoice.date <= end_datetime)  # FIXED
 
     # Execute all queries
-    total_output_vat = to_decimal(output_vat_query. scalar())
+    total_output_vat = to_decimal(output_vat_query.scalar())
     total_input_vat = to_decimal(input_vat_query.scalar())
     total_non_vat_sales = to_decimal(non_vat_sales_query.scalar())
     total_non_vat_ar = to_decimal(non_vat_ar_query.scalar())
@@ -641,14 +658,14 @@ def stock_card(product_id):
     
     # 1. Sales transactions
     sales_query = db.session.query(
-        Sale.created_at. label('date'),
+        Sale.created_at.label('date'),
         literal('Sale').label('type'),
-        Sale.id. label('ref_id'),
+        Sale.id.label('ref_id'),
         literal(0).label('qty_in'),
-        SaleItem.qty. label('qty_out'),
+        SaleItem.qty.label('qty_out'),
         SaleItem.cogs.label('cost'),
         Sale.voided_at.label('voided_at'),
-        Sale. document_number.label('doc_number')
+        Sale.document_number.label('doc_number')
     ).join(SaleItem).filter(SaleItem.product_id == product_id)
 
     # 2. Purchase transactions
@@ -658,14 +675,14 @@ def stock_card(product_id):
         Purchase.id.label('ref_id'),
         PurchaseItem.qty.label('qty_in'),
         literal(0).label('qty_out'),
-        PurchaseItem. unit_cost.label('cost'),
+        PurchaseItem.unit_cost.label('cost'),
         Purchase.voided_at.label('voided_at'),
         literal(None).label('doc_number')
-    ).join(PurchaseItem).filter(PurchaseItem. product_id == product_id)
+    ).join(PurchaseItem).filter(PurchaseItem.product_id == product_id)
 
     # 3. Stock adjustments
     adjustments_query = db.session.query(
-        StockAdjustment. created_at.label('date'),
+        StockAdjustment.created_at.label('date'),
         literal('Adjustment').label('type'),
         StockAdjustment.id.label('ref_id'),
         case(
@@ -677,9 +694,9 @@ def stock_card(product_id):
             else_=0
         ).label('qty_out'),
         literal(product.cost_price).label('cost'),
-        StockAdjustment. voided_at.label('voided_at'),
+        StockAdjustment.voided_at.label('voided_at'),
         literal(None).label('doc_number')
-    ).filter(StockAdjustment. product_id == product_id)
+    ).filter(StockAdjustment.product_id == product_id)
 
     # 4. AR Invoice Items
     ar_items_query = db.session.query(
@@ -697,7 +714,7 @@ def stock_card(product_id):
     ).join(ARInvoiceItem).filter(ARInvoiceItem.product_id == product_id)
 
     # 5. Inventory Movements
-    movements_query = db.session. query(
+    movements_query = db.session.query(
         InventoryMovement.created_at.label('date'),
         literal('Movement').label('type'),
         InventoryMovement.id.label('ref_id'),
@@ -706,7 +723,7 @@ def stock_card(product_id):
             else_=0
         ).label('qty_in'),
         case(
-            (InventoryMovement.movement_type == 'transfer', InventoryMovementItem. quantity),
+            (InventoryMovement.movement_type == 'transfer', InventoryMovementItem.quantity),
             else_=0
         ).label('qty_out'),
         InventoryMovementItem.unit_cost.label('cost'),
@@ -721,14 +738,17 @@ def stock_card(product_id):
         adjustments_query,
         ar_items_query,
         movements_query
-    ). alias('all_transactions')
+    ).alias('all_transactions')
 
     # ✅ Execute the unified query and order by date
-    transactions_raw = db.session.query(combined_query).order_by(combined_query.c.date). all()
+    BATCH_SIZE = 1000
+    transactions_raw = db.session.query(combined_query)\
+        .order_by(combined_query.c.date)\
+        .yield_per(BATCH_SIZE)  # Stream results
 
     # Process transactions for display
-    transactions = []
-    
+    transactions = []  # ✅ Use different variable name
+
     for t in transactions_raw:
         is_voided = t.voided_at is not None
         
@@ -738,9 +758,9 @@ def stock_card(product_id):
         elif t.type == 'Purchase':
             type_desc = f'Purchase #{t.ref_id}' + (' [VOIDED]' if is_voided else '')
         elif t.type == 'Adjustment':
-            type_desc = f'Adjustment #{t. ref_id}' + (' [VOIDED]' if is_voided else '')
+            type_desc = f'Adjustment #{t.ref_id}' + (' [VOIDED]' if is_voided else '')
         elif t.type == 'AR Invoice':
-            doc_num = t. doc_number or f"AR-{t.ref_id}"
+            doc_num = t.doc_number or f"AR-{t.ref_id}"
             type_desc = f'Billing Invoice {doc_num}' + (' [VOIDED]' if is_voided else '')
         elif t.type == 'Movement':
             type_desc = f'Movement #{t.ref_id}'
@@ -765,7 +785,7 @@ def stock_card(product_id):
                 'type': f'Void Reversal ({t.type} #{t.ref_id})',
                 'ref_id': t.ref_id,
                 'qty_in': t.qty_out,  # Swap
-                'qty_out': t. qty_in,  # Swap
+                'qty_out': t.qty_in,  # Swap
                 'cost': t.cost or product.cost_price,
                 'voided': False
             })
@@ -1090,7 +1110,7 @@ def aggregate_account_balances(start_date=None, end_date=None):
     if end_date:
         try:
             end_exclusive = end_date + timedelta(days=1)
-            query = query. filter(JournalEntry.created_at < end_exclusive)
+            query = query.filter(JournalEntry.created_at < end_exclusive)
         except Exception:
             query = query.filter(JournalEntry.created_at <= end_date)
     

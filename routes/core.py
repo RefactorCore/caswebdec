@@ -188,12 +188,12 @@ def index():
     # --- 4. 📊 KPI CALCULATIONS ---
     
     # SALES: Cash (POS) + AR (Invoices)
-    cash_sales_query = db.session.query(func.coalesce(func. sum(Sale.total), 0)).filter(Sale.voided_at.is_(None))
+    cash_sales_query = db.session.query(func.coalesce(func.sum(Sale.total), 0)).filter(Sale.voided_at.is_(None))
     ar_sales_query = db.session.query(func.coalesce(func.sum(ARInvoice.total), 0)).filter(ARInvoice.voided_at.is_(None))
 
     # PURCHASES: Inventory Purchases (Cash + Credit) + AP Bills
     inventory_purchases_query = db.session.query(func.coalesce(func.sum(Purchase.total), 0)).filter(Purchase.voided_at.is_(None))
-    ap_bills_query = db.session.query(func.coalesce(func. sum(APInvoice.total), 0)).filter(APInvoice.voided_at. is_(None))
+    ap_bills_query = db.session.query(func.coalesce(func.sum(APInvoice.total), 0)).filter(APInvoice.voided_at.is_(None))
 
     # Apply Date Filters
     if start_date:
@@ -1230,7 +1230,7 @@ def pos():
     search = request.args.get('search', '').strip()
 
     product_query = Product.query.filter_by(is_active=True)
-    consignment_query = ConsignmentItem. query.filter_by(is_active=True)\
+    consignment_query = ConsignmentItem.query.filter_by(is_active=True)\
         .options(joinedload(ConsignmentItem.consignment))
 
     if search:
@@ -1238,7 +1238,7 @@ def pos():
             (Product.name.ilike(f"%{search}%")) |
             (Product.sku.ilike(f"%{search}%"))
         )
-        consignment_query = consignment_query. filter(
+        consignment_query = consignment_query.filter(
             (ConsignmentItem.product_name.ilike(f"%{search}%")) |
             (ConsignmentItem.sku.ilike(f"%{search}%")) |
             (ConsignmentItem.barcode.ilike(f"%{search}%"))

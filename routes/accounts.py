@@ -106,7 +106,7 @@ def update_account(id):
         return redirect(url_for('accounts.chart_of_accounts'))
 
     # Check for duplicate name
-    if new_name != acc.name and Account. query.filter_by(name=new_name).first():
+    if new_name != acc.name and Account.query.filter_by(name=new_name).first():
         flash(f'Account name {new_name} already exists.', 'danger')
         return redirect(url_for('accounts.chart_of_accounts'))
 
@@ -122,7 +122,7 @@ def update_account(id):
     changes = []
     if acc.code != new_code:
         changes.append(f'code from "{acc.code}" to "{new_code}"')
-    if acc. name != new_name:
+    if acc.name != new_name:
         changes.append(f'name from "{acc.name}" to "{new_name}"')
     if acc.type != new_type:
         changes.append(f'type from "{acc.type}" to "{new_type}"')
