@@ -447,7 +447,35 @@ def billing_invoices():
 
     if request.method == 'POST':
         try:
-            customer_id = int(request.form.get('customer_id') or 0)
+            # ✅ CHANGED: Allow customer name OR customer_id
+            customer_name = request.form.get('customer_name', '').strip()
+            customer_id_str = request.form.get('customer_id', '').strip()
+            
+            # Determine if using existing customer or creating new
+            customer_id = None
+            customer = None
+            
+            if customer_id_str and customer_id_str.isdigit():
+                # Existing customer selected from dropdown
+                customer_id = int(customer_id_str)
+                customer = Customer.query.get(customer_id)
+                if not customer:
+                    flash('Selected customer not found', 'danger')
+                    return redirect(url_for('ar_ap.billing_invoices'))
+            elif customer_name:
+                # New customer name typed in
+                customer = Customer.query. filter_by(name=customer_name).first()
+                if not customer:
+                    # Create new customer
+                    customer = Customer(name=customer_name)
+                    db.session.add(customer)
+                    db. session.flush()
+                    flash(f'ℹ️ Created new customer: {customer_name}', 'info')
+                customer_id = customer.id
+            else:
+                flash('Please select or enter a customer name', 'danger')
+                return redirect(url_for('ar_ap.billing_invoices'))
+            
             description = request.form.get('description', '')
             is_vatable = request.form.get('is_vatable') == 'true'
 
@@ -455,9 +483,9 @@ def billing_invoices():
             if due_date_str:
                 due_date = datetime.strptime(due_date_str, '%Y-%m-%d')
             else:
-                customer = Customer.query.get(customer_id)
                 payment_terms = customer.payment_terms_days if customer and hasattr(customer, 'payment_terms_days') else 30
                 due_date = datetime.utcnow() + timedelta(days=payment_terms)
+
 
             product_ids = request.form.getlist('product_id[]')
             quantities = request.form.getlist('quantity[]')

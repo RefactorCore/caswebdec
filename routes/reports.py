@@ -264,15 +264,14 @@ def vat_report():
     )
     
     # --- INPUT VAT ---
-    input_vat_query = db.session.query(
-        func.sum(Purchase.vat)
+    input_vat_query = db. session.query(
+        func. sum(Purchase.vat)
     ).filter(
-        Purchase.is_vatable == True,
+        Purchase. is_vatable == True,
         Purchase.voided_at == None
     )
 
     # --- NON-VAT SALES ---
-    # Query for sales that are (is_vatable=False) OR (is_vatable=True AND vat=0)
     non_vat_sales_query = db.session.query(
         func.sum(Sale.total)
     ).filter(
@@ -291,10 +290,10 @@ def vat_report():
         func.sum(ARInvoice.total)
     ).filter(
         or_(
-            ARInvoice.is_vatable == False,
+            ARInvoice. is_vatable == False,
             and_(
                 ARInvoice.is_vatable == True,
-                ARInvoice.vat == 0.00
+                ARInvoice. vat == 0.00
             )
         ),
         ARInvoice.voided_at == None
@@ -309,7 +308,7 @@ def vat_report():
     )
 
     # --- NON-VAT AP INVOICES ---
-    non_vat_ap_query = db.session.query(
+    non_vat_ap_query = db.session. query(
         func.sum(APInvoice.total)
     ).filter(
         APInvoice.is_vatable == False,
@@ -322,21 +321,21 @@ def vat_report():
         output_vat_query = output_vat_query.filter(Sale.created_at >= start_datetime)
         input_vat_query = input_vat_query.filter(Purchase.created_at >= start_datetime)
         non_vat_sales_query = non_vat_sales_query.filter(Sale.created_at >= start_datetime)
-        non_vat_ar_query = non_vat_ar_query.filter(ARInvoice.created_at >= start_datetime)
+        non_vat_ar_query = non_vat_ar_query.filter(ARInvoice.date >= start_datetime)  # FIXED
         non_vat_purchases_query = non_vat_purchases_query.filter(Purchase.created_at >= start_datetime)
-        non_vat_ap_query = non_vat_ap_query.filter(APInvoice.created_at >= start_datetime)
+        non_vat_ap_query = non_vat_ap_query.filter(APInvoice.date >= start_datetime)  # FIXED
 
     if end_date:
         end_datetime = datetime.combine(end_date, datetime.max.time())
         output_vat_query = output_vat_query.filter(Sale.created_at <= end_datetime)
         input_vat_query = input_vat_query.filter(Purchase.created_at <= end_datetime)
         non_vat_sales_query = non_vat_sales_query.filter(Sale.created_at <= end_datetime)
-        non_vat_ar_query = non_vat_ar_query.filter(ARInvoice.created_at <= end_datetime)
+        non_vat_ar_query = non_vat_ar_query.filter(ARInvoice.date <= end_datetime)  # FIXED
         non_vat_purchases_query = non_vat_purchases_query.filter(Purchase.created_at <= end_datetime)
-        non_vat_ap_query = non_vat_ap_query.filter(APInvoice.created_at <= end_datetime)
+        non_vat_ap_query = non_vat_ap_query.filter(APInvoice.date <= end_datetime)  # FIXED
 
     # Execute all queries
-    total_output_vat = to_decimal(output_vat_query.scalar())
+    total_output_vat = to_decimal(output_vat_query. scalar())
     total_input_vat = to_decimal(input_vat_query.scalar())
     total_non_vat_sales = to_decimal(non_vat_sales_query.scalar())
     total_non_vat_ar = to_decimal(non_vat_ar_query.scalar())
@@ -348,14 +347,13 @@ def vat_report():
     total_non_vat_sales_combined = total_non_vat_sales + total_non_vat_ar
     total_non_vat_purchases_combined = total_non_vat_purchases + total_non_vat_ap
 
-    # ✅ FIX: The variable names here now match vat_report.html
     return render_template(
         'vat_report.html',
         total_output_vat=total_output_vat,
         total_input_vat=total_input_vat,
         vat_payable=vat_payable,
-        total_nonvat_sales=total_non_vat_sales_combined,  # <--- No underscore
-        total_nonvat_purchases=total_non_vat_purchases_combined, # <--- No underscore
+        total_nonvat_sales=total_non_vat_sales_combined,
+        total_nonvat_purchases=total_non_vat_purchases_combined,
         start_date=start_date_str,
         end_date=end_date_str
     )
